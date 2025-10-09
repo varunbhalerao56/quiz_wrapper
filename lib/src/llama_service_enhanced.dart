@@ -9,9 +9,16 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:ffi/ffi.dart';
 import 'ffi/llama_ffi.dart';
-
-// Import configuration from the new architecture
 import 'utils/llama_config.dart';
+
+// Toggle debug printing
+const bool _kDebugMode = true;
+
+void _debugPrint(String message) {
+  if (_kDebugMode) {
+    print('[LlamaService] $message');
+  }
+}
 
 /// Enhanced service that extends your working LlamaService
 class LlamaServiceEnhanced {
@@ -27,14 +34,18 @@ class LlamaServiceEnhanced {
   LlamaServiceEnhanced() {
     _lib = DynamicLibrary.open('llama.framework/llama');
     _llamaCpp = llama_cpp(_lib);
+    _debugPrint('Instance created');
   }
 
   /// Initialize the llama.cpp backend
   void init() {
-    if (_initialized) return;
+    if (_initialized) {
+      _debugPrint('Already initialized, skipping');
+      return;
+    }
     _llamaCpp.llama_backend_init();
     _initialized = true;
-    print('✓ LlamaServiceEnhanced initialized');
+    _debugPrint('✓ Backend initialized');
   }
 
   /// Load a model from file
@@ -46,9 +57,11 @@ class LlamaServiceEnhanced {
     }
 
     if (!File(modelPath).existsSync()) {
-      print('Model file not found: $modelPath');
+      _debugPrint('✗ Model file not found: $modelPath');
       return false;
     }
+
+    _debugPrint('Loading model from: $modelPath');
 
     // Get default model parameters
     final modelParams = _llamaCpp.llama_model_default_params();
@@ -60,10 +73,9 @@ class LlamaServiceEnhanced {
     modelParams.vocab_only = config.vocabOnly;
     modelParams.check_tensors = config.checkTensors;
 
-    print('Model params:');
-    print('  use_mmap: ${modelParams.use_mmap}');
-    print('  use_mlock: ${modelParams.use_mlock}');
-    print('  n_gpu_layers: ${modelParams.n_gpu_layers}');
+    _debugPrint(
+      'Model config: mmap=${modelParams.use_mmap}, mlock=${modelParams.use_mlock}, gpu_layers=${modelParams.n_gpu_layers}',
+    );
 
     // Load model
     final pathPtr = modelPath.toNativeUtf8();
@@ -71,16 +83,18 @@ class LlamaServiceEnhanced {
       _model = _llamaCpp.llama_load_model_from_file(pathPtr.cast<Char>(), modelParams);
 
       if (_model == nullptr || _model!.address == 0) {
-        print('Failed to load model');
+        _debugPrint('✗ Failed to load model');
         return false;
       }
 
-      print('✓ Model loaded successfully!');
+      _debugPrint('✓ Model loaded successfully');
 
       // Get vocab handle for tokenization
       _vocab = _llamaCpp.llama_model_get_vocab(_model!);
       if (_vocab == nullptr || _vocab!.address == 0) {
-        print('Warning: Failed to get vocab handle');
+        _debugPrint('⚠ Warning: Failed to get vocab handle');
+      } else {
+        _debugPrint('✓ Vocab handle acquired');
       }
 
       return true;
@@ -94,14 +108,16 @@ class LlamaServiceEnhanced {
     config ??= const ContextConfig();
 
     if (_model == null || _model!.address == 0) {
-      print('Must load model first');
+      _debugPrint('✗ Cannot create context: model not loaded');
       return false;
     }
 
     if (_context != null && _context!.address != 0) {
-      print('Context already exists');
+      _debugPrint('⚠ Context already exists');
       return false;
     }
+
+    _debugPrint('Creating context with n_ctx=${config.nCtx}, n_threads=${config.nThreads}');
 
     // Get default context parameters
     final ctxParams = _llamaCpp.llama_context_default_params();
@@ -114,32 +130,27 @@ class LlamaServiceEnhanced {
     ctxParams.offload_kqv = config.offloadKqv;
     ctxParams.no_perf = config.noPerf;
 
-    print('Context params:');
-    print('  n_ctx: ${ctxParams.n_ctx}');
-    print('  n_threads: ${ctxParams.n_threads}');
-    print('  embeddings: ${ctxParams.embeddings}');
-
     // Create context
     _context = _llamaCpp.llama_new_context_with_model(_model!, ctxParams);
 
     if (_context == nullptr || _context!.address == 0) {
-      print('Failed to create context');
+      _debugPrint('✗ Failed to create context');
       return false;
     }
 
     final actualCtx = _llamaCpp.llama_n_ctx(_context!);
-    print('✓ Context created successfully! Actual n_ctx: $actualCtx');
+    _debugPrint('✓ Context created! Actual n_ctx: $actualCtx');
 
     return true;
   }
 
   /// Create a configurable sampler chain
   Pointer<llama_sampler> _createConfigurableSampler(SamplerConfig config) {
+    _debugPrint('Creating sampler chain with config: $config');
+
     final samplerParams = _llamaCpp.llama_sampler_chain_default_params();
     samplerParams.no_perf = false;
     final chain = _llamaCpp.llama_sampler_chain_init(samplerParams);
-
-    print('Creating sampler with config: $config');
 
     // Add samplers in the correct order
 
@@ -152,35 +163,35 @@ class LlamaServiceEnhanced {
         config.presencePenalty,
       );
       _llamaCpp.llama_sampler_chain_add(chain, penalties);
-      print('  ✓ Added penalties sampler');
+      _debugPrint('  ✓ Added penalties sampler');
     }
 
     // 2. Top-K filtering
     if (config.topK > 0 && config.topK < 1000) {
       final topK = _llamaCpp.llama_sampler_init_top_k(config.topK);
       _llamaCpp.llama_sampler_chain_add(chain, topK);
-      print('  ✓ Added top-k sampler');
+      _debugPrint('  ✓ Added top-k=${config.topK} sampler');
     }
 
     // 3. Min-P filtering
     if (config.minP > 0.0 && config.minP < 1.0) {
       final minP = _llamaCpp.llama_sampler_init_min_p(config.minP, 1);
       _llamaCpp.llama_sampler_chain_add(chain, minP);
-      print('  ✓ Added min-p sampler');
+      _debugPrint('  ✓ Added min-p=${config.minP} sampler');
     }
 
     // 4. Top-P filtering
     if (config.topP < 1.0 && config.topP > 0.0) {
       final topP = _llamaCpp.llama_sampler_init_top_p(config.topP, 1);
       _llamaCpp.llama_sampler_chain_add(chain, topP);
-      print('  ✓ Added top-p sampler');
+      _debugPrint('  ✓ Added top-p=${config.topP} sampler');
     }
 
     // 5. Temperature scaling
     if (config.temperature != 1.0) {
       final temp = _llamaCpp.llama_sampler_init_temp(config.temperature);
       _llamaCpp.llama_sampler_chain_add(chain, temp);
-      print('  ✓ Added temperature sampler');
+      _debugPrint('  ✓ Added temperature=${config.temperature} sampler');
     }
 
     // 6. Final sampling method
@@ -189,7 +200,7 @@ class LlamaServiceEnhanced {
         : _llamaCpp.llama_sampler_init_dist(config.seed == -1 ? DateTime.now().millisecondsSinceEpoch : config.seed);
 
     _llamaCpp.llama_sampler_chain_add(chain, finalSampler);
-    print('  ✓ Added final sampler');
+    _debugPrint('  ✓ Added final sampler (${config.temperature == 0.0 ? "greedy" : "dist"})');
 
     return chain;
   }
@@ -199,13 +210,13 @@ class LlamaServiceEnhanced {
     config ??= const SamplerConfig();
 
     if (_context == null || _context!.address == 0) {
-      print('Must create context first');
+      _debugPrint('✗ Cannot generate: context not created');
       return null;
     }
 
-    print('\n=== Enhanced Generation ===');
-    print('Prompt: "$prompt"');
-    print('Config: $config');
+    _debugPrint('\n=== Enhanced Generation ===');
+    _debugPrint('Prompt: "$prompt"');
+    _debugPrint('Max tokens: ${config.maxTokens}, Temperature: ${config.temperature}');
 
     // Yield to UI thread
     await Future.delayed(const Duration(milliseconds: 10));
@@ -213,9 +224,11 @@ class LlamaServiceEnhanced {
     // Tokenize the prompt
     final tokens = tokenizeText(prompt);
     if (tokens.isEmpty) {
-      print('Failed to tokenize prompt');
+      _debugPrint('✗ Failed to tokenize prompt');
       return null;
     }
+
+    _debugPrint('✓ Tokenized into ${tokens.length} tokens');
 
     // Yield to UI thread
     await Future.delayed(const Duration(milliseconds: 10));
@@ -227,7 +240,6 @@ class LlamaServiceEnhanced {
     _sampler = _createConfigurableSampler(config);
 
     final nPrompt = tokens.length;
-    print('Prompt tokens: $nPrompt');
 
     // Create batch for prompt
     final tokensPtr = malloc<llama_token>(nPrompt);
@@ -238,12 +250,12 @@ class LlamaServiceEnhanced {
     try {
       var batch = _llamaCpp.llama_batch_get_one(tokensPtr, nPrompt);
 
-      print('Decoding prompt batch...');
+      _debugPrint('Decoding prompt batch...');
       if (_llamaCpp.llama_decode(_context!, batch) != 0) {
-        print('Failed to decode prompt');
+        _debugPrint('✗ Failed to decode prompt');
         return null;
       }
-      print('✓ Prompt decoded');
+      _debugPrint('✓ Prompt decoded');
 
       // Generate tokens
       final result = StringBuffer();
@@ -253,32 +265,30 @@ class LlamaServiceEnhanced {
       final singleTokenPtr = malloc<llama_token>();
       try {
         while (nDecoded < config.maxTokens && nPos < _llamaCpp.llama_n_ctx(_context!)) {
-          // Yield to UI thread every few tokens to prevent blocking
+          // Yield to UI thread every few tokens
           if (nDecoded % 5 == 0) {
             await Future.delayed(const Duration(milliseconds: 1));
           }
 
-          // Sample next token using configured sampler
+          // Sample next token
           final newToken = _llamaCpp.llama_sampler_sample(_sampler!, _context!, -1);
 
           // Check if end of generation
           if (_llamaCpp.llama_token_is_eog(_vocab!, newToken)) {
-            print('\n✓ Hit end-of-generation token');
+            _debugPrint('\n✓ Hit end-of-generation token at position $nDecoded');
             break;
           }
 
           // Detokenize and add to result
           final tokenText = detokenize(newToken);
           result.write(tokenText);
-          print(tokenText);
 
           // Check for stop strings
-          final currentText = result.toString();
           if (config.stopStrings.isNotEmpty) {
+            final currentText = result.toString();
             for (final stopString in config.stopStrings) {
               if (currentText.contains(stopString)) {
-                print('\n✓ Hit stop string: "$stopString"');
-                // Truncate at stop string
+                _debugPrint('✓ Hit stop string: "$stopString" at position $nDecoded');
                 final index = currentText.indexOf(stopString);
                 return currentText.substring(0, index);
               }
@@ -291,7 +301,7 @@ class LlamaServiceEnhanced {
 
           // Decode the new token
           if (_llamaCpp.llama_decode(_context!, batch) != 0) {
-            print('\nFailed to decode token $nDecoded');
+            _debugPrint('✗ Failed to decode token at position $nDecoded');
             break;
           }
 
@@ -302,8 +312,7 @@ class LlamaServiceEnhanced {
         malloc.free(singleTokenPtr);
       }
 
-      print('\n\n=== Generation complete ===');
-      print('Generated $nDecoded tokens');
+      _debugPrint('=== Generation complete: $nDecoded tokens ===\n');
 
       return result.toString();
     } finally {
@@ -311,7 +320,7 @@ class LlamaServiceEnhanced {
     }
   }
 
-  /// Simple tokenization (reuse from parent)
+  /// Tokenization
   List<int> tokenizeText(String text, {bool addBos = true, bool special = true}) {
     if (_model == null || _model!.address == 0) {
       throw StateError('Must load model first');
@@ -334,7 +343,10 @@ class LlamaServiceEnhanced {
         special,
       );
 
-      if (tokenCount <= 0) return [];
+      if (tokenCount <= 0) {
+        _debugPrint('⚠ Tokenization returned count: $tokenCount');
+        return [];
+      }
 
       // Second pass: get tokens
       final tokensPtr = malloc<llama_token>(tokenCount);
@@ -349,7 +361,10 @@ class LlamaServiceEnhanced {
           special,
         );
 
-        if (actualCount < 0) return [];
+        if (actualCount < 0) {
+          _debugPrint('⚠ Tokenization failed with code: $actualCount');
+          return [];
+        }
 
         final tokens = <int>[];
         for (int i = 0; i < actualCount; i++) {
@@ -365,7 +380,7 @@ class LlamaServiceEnhanced {
     }
   }
 
-  /// Simple detokenization
+  /// Detokenization
   String detokenize(int token) {
     if (_vocab == null || _vocab!.address == 0) {
       throw StateError('Vocab not available');
@@ -395,230 +410,141 @@ class LlamaServiceEnhanced {
     return _llamaCpp.llama_token_eos(_vocab!);
   }
 
-  /// Generate JSON with optimized approach (without grammar for now)
+  /// JSON generation with explicit rules - let model generate complete JSON
   Future<String?> generateJson(String prompt, {JsonConfig? jsonConfig, SamplerConfig? samplerConfig}) async {
     jsonConfig ??= const JsonConfig();
     samplerConfig ??= const SamplerConfig();
 
     if (_context == null || _vocab == null) {
-      print('Must create context first');
+      _debugPrint('✗ Cannot generate JSON: context/vocab not available');
       return null;
     }
 
-    print('\n=== JSON Generation (Optimized) ===');
+    _debugPrint('\n=== JSON Generation ===');
+    _debugPrint('User task: "$prompt"');
 
-    // Use a more effective prompt format that's clearer about what we want
-    final formattedPrompt = '''Create a JSON object based on the following prompt: $prompt
-          Only return the JSON object, no other text.
-{''';
+    // GEMMA CHAT TEMPLATE with explicit JSON rules
+    final formattedPrompt =
+        '''<start_of_turn>user
+Task: $prompt
 
-    print('Formatted prompt: "$formattedPrompt"');
+Generate a valid JSON object following these rules:
+
+JSON STRUCTURE:
+- Start with { and end with }
+- Use key-value pairs separated by commas
+- Keys must be strings in double quotes
+- No trailing comma after last item
+
+DATA TYPES:
+- String: "text in double quotes"
+- Number: 42 or 3.14 (no quotes)
+- Boolean: true or false (no quotes)
+- Null: null (no quotes)
+- Object: {"nested": "data"}
+- Array: [1, 2, 3]
+
+CRITICAL:
+- Use ONLY double quotes, never single quotes
+- No comments allowed
+- All keys must be quoted
+- No trailing commas
+
+Output only the JSON, nothing else.
+<end_of_turn>
+<start_of_turn>model
+''';
+
+    _debugPrint('Using Gemma template with explicit JSON rules');
 
     try {
-      // Use very conservative sampling for JSON generation
+      // Balanced sampling
       final jsonSamplerConfig = SamplerConfig(
-        temperature: 0.01, // Almost deterministic
-        topP: 0.5,
-        topK: 5, // Very focused
-        repeatPenalty: 2.0, // Very strong repeat penalty
-        frequencyPenalty: 0.5, // Strong frequency penalty
-        presencePenalty: 0.3,
-        maxTokens: math.min(samplerConfig.maxTokens, 150), // Limit tokens for JSON
-        stopStrings: ['\n\n', 'User:', 'Respond', '```', '//', '/*'],
+        temperature: 0.3,
+        topP: 0.9,
+        topK: 40,
+        repeatPenalty: 1.1,
+        frequencyPenalty: 0.0,
+        presencePenalty: 0.0,
+        maxTokens: 8000, // Increased for rules + JSON
+        stopStrings: ['<end_of_turn>', '<start_of_turn>', '\n\n\n'],
       );
 
-      print('Using optimized JSON sampling: $jsonSamplerConfig');
+      _debugPrint('Sampler: temp=${jsonSamplerConfig.temperature}, maxTokens=${jsonSamplerConfig.maxTokens}');
 
-      // Generate without grammar constraints (they seem to be causing issues)
       final result = await generateEnhanced(formattedPrompt, config: jsonSamplerConfig);
 
-      if (result != null) {
-        // Since we started with '{', we need to reconstruct the JSON
-        String cleanedResult = '{${result.trim()}';
-
-        // Remove comments and fix common issues
-        cleanedResult = _cleanJsonText(cleanedResult);
-
-        // Try to extract a complete JSON object
-        cleanedResult = _extractCompleteJson(cleanedResult);
-
-        if (jsonConfig.strictMode) {
-          // Validate JSON
-          try {
-            final decoded = jsonDecode(cleanedResult);
-            print('✓ Generated valid JSON');
-
-            if (jsonConfig.prettyPrint) {
-              return const JsonEncoder.withIndent('  ').convert(decoded);
-            }
-            return cleanedResult;
-          } catch (e) {
-            print('✗ Generated invalid JSON: $e');
-            print('Raw result: "$result"');
-            print('Cleaned result: "$cleanedResult"');
-
-            // Try to fix common JSON issues
-            String fixedJson = _tryFixJson(cleanedResult);
-            try {
-              final decoded = jsonDecode(fixedJson);
-              print('✓ Fixed and validated JSON');
-              return jsonConfig.prettyPrint ? const JsonEncoder.withIndent('  ').convert(decoded) : fixedJson;
-            } catch (e2) {
-              print('✗ Could not fix JSON: $e2');
-              return jsonConfig.strictMode ? null : cleanedResult;
-            }
-          }
-        }
-
-        return cleanedResult;
+      if (result == null) {
+        _debugPrint('✗ Generation returned null');
+        return null;
       }
 
-      return null;
+      _debugPrint('Raw output (${result.length} chars):');
+      _debugPrint(result);
+
+      // Minimal cleanup - just trim whitespace
+      final cleaned = result.trim();
+
+      // Try to parse
+      try {
+        final decoded = jsonDecode(cleaned);
+        _debugPrint('✓ Valid JSON!');
+
+        if (jsonConfig.prettyPrint) {
+          return const JsonEncoder.withIndent('  ').convert(decoded);
+        }
+        return cleaned;
+      } catch (e) {
+        // _debugPrint('✗ Invalid JSON: $e');
+        // _debugPrint('Cleaned output: "$cleaned"');
+
+        // if (jsonConfig.strictMode) {
+        //   _debugPrint('Strict mode: returning null');
+        //   return null;
+        // }
+
+        // _debugPrint('Non-strict mode: returning raw output');
+        return cleaned;
+      }
     } catch (e) {
-      print('JSON generation error: $e');
+      _debugPrint('✗ Error: $e');
       return null;
     }
   }
 
-  /// Clean JSON text by removing comments and fixing common issues
-  String _cleanJsonText(String json) {
-    String cleaned = json;
-
-    // Remove comments (// style) - this was the main issue!
-    cleaned = cleaned.replaceAll(RegExp(r'//.*$', multiLine: true), '');
-
-    // Remove /* */ style comments
-    cleaned = cleaned.replaceAll(RegExp(r'/\*.*?\*/', multiLine: true, dotAll: true), '');
-
-    // Remove template placeholders like <NAME>, <|user's name here>
-    cleaned = cleaned.replaceAll(RegExp(r'<\|[^>]*\|>'), 'placeholder');
-    cleaned = cleaned.replaceAll(RegExp(r'<[^>]*>'), 'placeholder');
-
-    // Fix malformed field names (missing quotes, colons)
-    cleaned = cleaned.replaceAll(RegExp(r'"price_incl:([^,}]+)'), r'"price": $1');
-    cleaned = cleaned.replaceAll(RegExp(r'(\w+)_incl:'), r'"$1":');
-
-    // Remove any explanatory text in parentheses
-    cleaned = cleaned.replaceAll(RegExp(r'\([^)]*\)'), '');
-
-    // Clean up whitespace
-    cleaned = cleaned.replaceAll(RegExp(r'\s+'), ' ');
-
-    return cleaned;
-  }
-
-  /// Extract a complete JSON object from text
-  String _extractCompleteJson(String text) {
-    String result = text.trim();
-
-    // Find the first complete JSON object
-    int braceCount = 0;
-    int startIndex = -1;
-    int endIndex = -1;
-    bool inString = false;
-    bool escaped = false;
-
-    for (int i = 0; i < result.length; i++) {
-      final char = result[i];
-
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-
-      if (char == '\\' && inString) {
-        escaped = true;
-        continue;
-      }
-
-      if (char == '"') {
-        inString = !inString;
-        continue;
-      }
-
-      if (!inString) {
-        if (char == '{') {
-          if (startIndex == -1) startIndex = i;
-          braceCount++;
-        } else if (char == '}') {
-          braceCount--;
-          if (braceCount == 0 && startIndex != -1) {
-            endIndex = i + 1;
-            break;
-          }
-        }
-      }
-    }
-
-    if (startIndex != -1 && endIndex != -1) {
-      result = result.substring(startIndex, endIndex);
-    }
-
-    return result;
-  }
-
-  /// Try to fix common JSON formatting issues
-  String _tryFixJson(String json) {
-    String fixed = json.trim();
-
-    // Remove any trailing commas before closing braces/brackets
-    fixed = fixed.replaceAll(RegExp(r',(\s*[}\]])'), r'$1');
-
-    // Fix double quotes issue
-    fixed = fixed.replaceAll('""', '"');
-
-    // Fix missing quotes around field names
-    fixed = fixed.replaceAll(RegExp(r'(\w+)(\s*:)'), r'"\1"$2');
-
-    // Fix single quotes to double quotes
-    fixed = fixed.replaceAll("'", '"');
-
-    // Fix trailing commas
-    fixed = fixed.replaceAll(RegExp(r',(\s*})'), r'$1');
-
-    // Ensure proper closing
-    if (!fixed.endsWith('}') && !fixed.endsWith(']')) {
-      if (fixed.contains('{')) {
-        fixed += '}';
-      } else if (fixed.contains('[')) {
-        fixed += ']';
-      }
-    }
-
-    return fixed;
-  }
-
-  /// Stream generation with real-time updates (better UX)
+  /// Stream generation with real-time updates
   Stream<String> generateStream(String prompt, {SamplerConfig? config}) async* {
     config ??= const SamplerConfig();
 
     if (_context == null || _context!.address == 0) {
+      _debugPrint('✗ Cannot stream: context not created');
       yield 'Error: Must create context first';
       return;
     }
 
-    print('\n=== Streaming Generation ===');
-    print('Prompt: "$prompt"');
+    _debugPrint('\n=== Streaming Generation ===');
+    _debugPrint('Prompt: "$prompt"');
 
     try {
-      // Tokenize the prompt
       await Future.delayed(const Duration(milliseconds: 10));
       final tokens = tokenizeText(prompt);
       if (tokens.isEmpty) {
-        yield 'Error: Failed to tokenize prompt';
+        _debugPrint('✗ Failed to tokenize prompt');
+        yield 'Error: Failed to tokenize';
         return;
       }
 
-      // Create configurable sampler
+      _debugPrint('✓ Tokenized into ${tokens.length} tokens');
+
+      // Create sampler
       if (_sampler != null && _sampler!.address != 0) {
         _llamaCpp.llama_sampler_free(_sampler!);
       }
       _sampler = _createConfigurableSampler(config);
 
       final nPrompt = tokens.length;
-      print('Prompt tokens: $nPrompt');
 
-      // Create batch for prompt
+      // Create batch
       final tokensPtr = malloc<llama_token>(nPrompt);
       for (int i = 0; i < nPrompt; i++) {
         tokensPtr[i] = tokens[i];
@@ -627,14 +553,14 @@ class LlamaServiceEnhanced {
       try {
         var batch = _llamaCpp.llama_batch_get_one(tokensPtr, nPrompt);
 
-        print('Decoding prompt batch...');
+        _debugPrint('Decoding prompt...');
         if (_llamaCpp.llama_decode(_context!, batch) != 0) {
-          yield 'Error: Failed to decode prompt';
+          _debugPrint('✗ Failed to decode prompt');
+          yield 'Error: Decode failed';
           return;
         }
-        print('✓ Prompt decoded');
+        _debugPrint('✓ Prompt decoded, starting generation...');
 
-        // Generate tokens one by one
         int nDecoded = 0;
         int nPos = nPrompt;
         final result = StringBuffer();
@@ -642,83 +568,83 @@ class LlamaServiceEnhanced {
         final singleTokenPtr = malloc<llama_token>();
         try {
           while (nDecoded < config.maxTokens && nPos < _llamaCpp.llama_n_ctx(_context!)) {
-            // Sample next token
             final newToken = _llamaCpp.llama_sampler_sample(_sampler!, _context!, -1);
 
-            // Check if end of generation
             if (_llamaCpp.llama_token_is_eog(_vocab!, newToken)) {
-              print('\n✓ Hit end-of-generation token');
+              _debugPrint('✓ Streaming complete: EOG token at $nDecoded');
               break;
             }
 
-            // Detokenize and yield the token
             final tokenText = detokenize(newToken);
             result.write(tokenText);
-            yield tokenText; // Stream the token immediately
+            yield tokenText; // Stream immediately
 
-            // Check for stop strings
-            final currentText = result.toString();
+            // Check stop strings
             if (config.stopStrings.isNotEmpty) {
+              final currentText = result.toString();
               for (final stopString in config.stopStrings) {
                 if (currentText.contains(stopString)) {
-                  print('\n✓ Hit stop string: "$stopString"');
-                  return; // Stop streaming
+                  _debugPrint('✓ Streaming complete: stop string "$stopString" at $nDecoded');
+                  return;
                 }
               }
             }
 
-            // Prepare batch with single new token
             singleTokenPtr[0] = newToken;
             batch = _llamaCpp.llama_batch_get_one(singleTokenPtr, 1);
 
-            // Decode the new token
             if (_llamaCpp.llama_decode(_context!, batch) != 0) {
-              print('\nFailed to decode token $nDecoded');
+              _debugPrint('✗ Decode failed at token $nDecoded');
               break;
             }
 
             nDecoded++;
             nPos++;
 
-            // Small delay to prevent UI blocking
             await Future.delayed(const Duration(milliseconds: 1));
           }
+
+          _debugPrint('=== Streaming complete: $nDecoded tokens ===');
         } finally {
           malloc.free(singleTokenPtr);
         }
-
-        print('\n\n=== Streaming complete ===');
-        print('Generated $nDecoded tokens');
       } finally {
         malloc.free(tokensPtr);
       }
     } catch (e) {
+      _debugPrint('✗ Streaming error: $e');
       yield 'Error: $e';
     }
   }
 
   /// Clean up resources
   void dispose() {
+    _debugPrint('Disposing resources...');
+
     if (_sampler != null && _sampler!.address != 0) {
       _llamaCpp.llama_sampler_free(_sampler!);
       _sampler = null;
+      _debugPrint('  ✓ Sampler freed');
     }
 
     if (_context != null && _context!.address != 0) {
       _llamaCpp.llama_free(_context!);
       _context = null;
+      _debugPrint('  ✓ Context freed');
     }
 
     if (_model != null && _model!.address != 0) {
       _llamaCpp.llama_model_free(_model!);
       _model = null;
+      _debugPrint('  ✓ Model freed');
     }
 
     if (_initialized) {
       _llamaCpp.llama_backend_free();
       _initialized = false;
+      _debugPrint('  ✓ Backend freed');
     }
 
-    print('✓ LlamaServiceEnhanced disposed');
+    _debugPrint('✓ Disposal complete');
   }
 }
