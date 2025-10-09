@@ -1,7 +1,7 @@
-/// Advanced sampling methods for LlamaService
+/// lib/src/generation/llama_sampler.dart
 ///
-/// Provides Mirostat 1.0/2.0, DRY repetition control, Typical sampling,
-/// XTC sampling, and other advanced sampling techniques.
+/// Sampler management and grammar-constrained generation.
+/// Provides advanced sampling control and JSON schema enforcement.
 
 // ignore_for_file: dangling_library_doc_comments
 
@@ -10,447 +10,251 @@ import 'package:ffi/ffi.dart';
 import 'package:quiz_wrapper/src/ffi/llama_ffi.dart';
 import 'package:quiz_wrapper/src/core/llama_exceptions.dart';
 import 'package:quiz_wrapper/src/utils/llama_config.dart';
-import 'package:flutter/foundation.dart';
+import 'package:quiz_wrapper/src/utils/llama_helpers.dart';
 
-/// Advanced sampling configuration
-class AdvancedSamplerConfig {
-  // Mirostat parameters
-  final bool useMirostat;
-  final int mirostatVersion; // 1 or 2
-  final double mirostatTau;
-  final double mirostatEta;
-  final int mirostatM; // Only for v1
+/// Sampler parameters for createSamplerChain
+///
+/// Simplified parameters that work independently of your existing SamplerConfig.
+/// Use these when creating a sampler chain with LlamaSampler.
+class SamplerParams {
+  final int seed;
+  final int topK;
+  final double topP;
+  final double minP;
+  final double temp;
+  final double penaltyRepeat;
+  final double penaltyFreq;
+  final double penaltyPresent;
+  final int penaltyLastN;
 
-  // DRY (Don't Repeat Yourself) parameters
-  final bool useDry;
-  final double dryMultiplier;
-  final double dryBase;
-  final int dryAllowedLength;
-  final int dryPenaltyLastN;
-  final List<String> drySequenceBreakers;
-
-  // Typical sampling
-  final bool useTypical;
-  final double typicalP;
-  final int typicalMinKeep;
-
-  // XTC sampling
-  final bool useXtc;
-  final double xtcProbability;
-  final double xtcThreshold;
-  final int xtcMinKeep;
-
-  const AdvancedSamplerConfig({
-    // Mirostat
-    this.useMirostat = false,
-    this.mirostatVersion = 2,
-    this.mirostatTau = 5.0,
-    this.mirostatEta = 0.1,
-    this.mirostatM = 100,
-
-    // DRY
-    this.useDry = false,
-    this.dryMultiplier = 0.8,
-    this.dryBase = 1.75,
-    this.dryAllowedLength = 2,
-    this.dryPenaltyLastN = 256,
-    this.drySequenceBreakers = const ['\n', '.', '!', '?', ':', ';'],
-
-    // Typical
-    this.useTypical = false,
-    this.typicalP = 0.95,
-    this.typicalMinKeep = 1,
-
-    // XTC
-    this.useXtc = false,
-    this.xtcProbability = 0.1,
-    this.xtcThreshold = 0.1,
-    this.xtcMinKeep = 1,
+  const SamplerParams({
+    this.seed = 0,
+    this.topK = 40,
+    this.topP = 0.95,
+    this.minP = 0.05,
+    this.temp = 0.8,
+    this.penaltyRepeat = 1.0,
+    this.penaltyFreq = 0.0,
+    this.penaltyPresent = 0.0,
+    this.penaltyLastN = 64,
   });
 
-  /// Preset for high-quality creative writing
-  static const AdvancedSamplerConfig creative = AdvancedSamplerConfig(
-    useDry: true,
-    dryMultiplier: 0.8,
-    dryBase: 1.75,
-    useTypical: true,
-    typicalP: 0.95,
-  );
+  /// Deterministic sampling - always picks highest probability
+  static const deterministic = SamplerParams(temp: 0.0, topK: 1, topP: 1.0, minP: 0.0);
 
-  /// Preset for consistent, coherent output
-  static const AdvancedSamplerConfig coherent = AdvancedSamplerConfig(
-    useMirostat: true,
-    mirostatVersion: 2,
-    mirostatTau: 5.0,
-    mirostatEta: 0.1,
-    useDry: true,
-  );
+  /// Creative sampling - high randomness
+  static const creative = SamplerParams(temp: 0.9, topP: 0.95, topK: 40, minP: 0.05);
 
-  /// Preset for exploration and variety
-  static const AdvancedSamplerConfig exploratory = AdvancedSamplerConfig(
-    useXtc: true,
-    xtcProbability: 0.1,
-    xtcThreshold: 0.1,
-    useTypical: true,
-    typicalP: 0.9,
-  );
+  /// Balanced sampling - moderate randomness
+  static const balanced = SamplerParams(temp: 0.7, topP: 0.9, topK: 40, minP: 0.05);
+
+  /// Precise sampling - low randomness
+  static const precise = SamplerParams(temp: 0.3, topP: 0.85, topK: 20, minP: 0.1);
+
+  /// Copy with modifications
+  SamplerParams copyWith({
+    int? seed,
+    int? topK,
+    double? topP,
+    double? minP,
+    double? temp,
+    double? penaltyRepeat,
+    double? penaltyFreq,
+    double? penaltyPresent,
+    int? penaltyLastN,
+  }) {
+    return SamplerParams(
+      seed: seed ?? this.seed,
+      topK: topK ?? this.topK,
+      topP: topP ?? this.topP,
+      minP: minP ?? this.minP,
+      temp: temp ?? this.temp,
+      penaltyRepeat: penaltyRepeat ?? this.penaltyRepeat,
+      penaltyFreq: penaltyFreq ?? this.penaltyFreq,
+      penaltyPresent: penaltyPresent ?? this.penaltyPresent,
+      penaltyLastN: penaltyLastN ?? this.penaltyLastN,
+    );
+  }
 }
 
-/// Advanced sampler builder that creates complex sampler chains
-class AdvancedSamplerBuilder {
+/// Sampler manager for creating and managing llama.cpp sampler chains
+///
+/// Usage:
+/// ```dart
+/// final sampler = LlamaSampler(llamaCpp);
+/// final chain = sampler.createSamplerChain(
+///   vocab: vocab,
+///   params: SamplerParams.precise,
+///   grammar: GrammarConfig.quizJson,  // Force valid quiz JSON!
+/// );
+/// ```
+class LlamaSampler with DisposableMixin {
   final llama_cpp _llamaCpp;
-  final Pointer<llama_vocab> _vocab;
+  Pointer<llama_sampler>? _sampler;
 
-  AdvancedSamplerBuilder(this._llamaCpp, this._vocab);
+  LlamaSampler(this._llamaCpp);
 
-  /// Create an advanced sampler chain
-  Pointer<llama_sampler> createAdvancedSampler({
-    required SamplerConfig basicConfig,
-    AdvancedSamplerConfig? advancedConfig,
+  /// Create a sampler chain with optional grammar constraint
+  ///
+  /// The sampler chain processes tokens in order:
+  /// 1. Distribution sampling (seed-based randomness)
+  /// 2. Top-K filtering (keep only top K tokens)
+  /// 3. Top-P filtering (nucleus sampling)
+  /// 4. Min-P filtering (minimum probability threshold)
+  /// 5. Temperature scaling (randomness control)
+  /// 6. Grammar constraint (if provided - FORCES valid output)
+  /// 7. Repetition penalties (prevent repetition)
+  ///
+  /// [vocab] - The vocabulary from the model
+  /// [params] - Sampling parameters (use presets or custom)
+  /// [grammar] - Optional grammar to constrain output (100% valid JSON)
+  Pointer<llama_sampler> createSamplerChain({
+    required Pointer<llama_vocab> vocab,
+    SamplerParams params = const SamplerParams(),
+    GrammarConfig? grammar,
   }) {
-    advancedConfig ??= const AdvancedSamplerConfig();
-
-    // Validate parameters
-    LlamaSafety.validateSamplingParams(
-      temperature: basicConfig.temperature,
-      topP: basicConfig.topP,
-      topK: basicConfig.topK,
-      minP: basicConfig.minP,
-      operation: 'createAdvancedSampler',
-    );
-
-    final samplerParams = _llamaCpp.llama_sampler_chain_default_params();
-    samplerParams.no_perf = false;
-    final chain = _llamaCpp.llama_sampler_chain_init(samplerParams);
-
-    debugPrint('Creating advanced sampler chain:');
-    _logSamplerConfig(basicConfig, advancedConfig);
-
-    // Build sampler chain in correct order
-    _addPenaltySamplers(chain, basicConfig);
-    _addDrySampler(chain, advancedConfig);
-    _addFilteringSamplers(chain, basicConfig);
-    _addAdvancedSamplers(chain, advancedConfig);
-    _addTemperatureSampler(chain, basicConfig);
-    _addFinalSampler(chain, basicConfig, advancedConfig);
-
-    return chain;
-  }
-
-  /// Add penalty-based samplers (repetition, frequency, presence)
-  void _addPenaltySamplers(Pointer<llama_sampler> chain, SamplerConfig config) {
-    if (config.repeatPenalty != 1.0 || config.frequencyPenalty != 0.0 || config.presencePenalty != 0.0) {
-      final penalties = _llamaCpp.llama_sampler_init_penalties(
-        64, // penalty_last_n
-        config.repeatPenalty,
-        config.frequencyPenalty,
-        config.presencePenalty,
-      );
-      _llamaCpp.llama_sampler_chain_add(chain, penalties);
-      debugPrint('  ✓ Added penalties sampler');
-    }
-  }
-
-  /// Add DRY (Don't Repeat Yourself) sampler
-  void _addDrySampler(Pointer<llama_sampler> chain, AdvancedSamplerConfig config) {
-    if (!config.useDry) return;
+    checkNotDisposed('createSamplerChain');
 
     try {
-      // Convert sequence breakers to C string array
-      final breakersPtr = malloc<Pointer<Char>>(config.drySequenceBreakers.length);
-      final breakerPtrs = <Pointer<Utf8>>[];
+      // Initialize sampler chain
+      final sparams = _llamaCpp.llama_sampler_chain_default_params();
+      sparams.no_perf = false;
+      final chain = _llamaCpp.llama_sampler_chain_init(sparams);
 
-      try {
-        for (int i = 0; i < config.drySequenceBreakers.length; i++) {
-          final breakerPtr = config.drySequenceBreakers[i].toNativeUtf8();
-          breakerPtrs.add(breakerPtr);
-          breakersPtr[i] = breakerPtr.cast<Char>();
+      // 1. Distribution sampling (provides base randomness)
+      _llamaCpp.llama_sampler_chain_add(chain, _llamaCpp.llama_sampler_init_dist(params.seed));
+
+      // 2. Top-K sampling (keep only K most likely tokens)
+      _llamaCpp.llama_sampler_chain_add(chain, _llamaCpp.llama_sampler_init_top_k(params.topK));
+
+      // 3. Top-P / Nucleus sampling (cumulative probability threshold)
+      _llamaCpp.llama_sampler_chain_add(chain, _llamaCpp.llama_sampler_init_top_p(params.topP, 1));
+
+      // 4. Min-P sampling (minimum probability threshold)
+      _llamaCpp.llama_sampler_chain_add(chain, _llamaCpp.llama_sampler_init_min_p(params.minP, 1));
+
+      // 5. Temperature sampling (scale randomness)
+      _llamaCpp.llama_sampler_chain_add(chain, _llamaCpp.llama_sampler_init_temp(params.temp));
+
+      // 6. Grammar constraint (if provided - this FORCES valid structure)
+      if (grammar != null && grammar.grammarStr.isNotEmpty) {
+        final grammarSampler = _createGrammarSampler(vocab, grammar);
+        if (grammarSampler != nullptr) {
+          _llamaCpp.llama_sampler_chain_add(chain, grammarSampler);
+          LlamaLogger.info('✓ Grammar constraint applied: ${grammar.grammarRoot}');
         }
-
-        final drySampler = _llamaCpp.llama_sampler_init_dry(
-          _vocab,
-          2048, // n_ctx_train (would get from model)
-          config.dryMultiplier,
-          config.dryBase,
-          config.dryAllowedLength,
-          config.dryPenaltyLastN,
-          breakersPtr,
-          config.drySequenceBreakers.length,
-        );
-
-        _llamaCpp.llama_sampler_chain_add(chain, drySampler);
-        debugPrint('  ✓ Added DRY sampler');
-      } finally {
-        for (final ptr in breakerPtrs) {
-          malloc.free(ptr);
-        }
-        malloc.free(breakersPtr);
       }
+
+      // 7. Repetition penalties (prevent repetitive output)
+      _llamaCpp.llama_sampler_chain_add(
+        chain,
+        _llamaCpp.llama_sampler_init_penalties(
+          params.penaltyLastN,
+          params.penaltyRepeat,
+          params.penaltyFreq,
+          params.penaltyPresent,
+        ),
+      );
+
+      _sampler = chain;
+      LlamaLogger.info('✓ Sampler chain created successfully');
+      return chain;
     } catch (e) {
-      debugPrint('  ✗ Failed to add DRY sampler: $e');
+      throw LlamaException('Failed to create sampler chain: $e', operation: 'createSamplerChain');
     }
   }
 
-  /// Add filtering samplers (Top-K, Top-P, Min-P)
-  void _addFilteringSamplers(Pointer<llama_sampler> chain, SamplerConfig config) {
-    // Top-K filtering
-    if (config.topK > 0 && config.topK < 1000) {
-      final topK = _llamaCpp.llama_sampler_init_top_k(config.topK);
-      _llamaCpp.llama_sampler_chain_add(chain, topK);
-      debugPrint('  ✓ Added top-k sampler');
-    }
+  /// Internal: Create grammar sampler (standard or lazy)
+  Pointer<llama_sampler> _createGrammarSampler(Pointer<llama_vocab> vocab, GrammarConfig grammar) {
+    final grammarStrPtr = grammar.grammarStr.toNativeUtf8().cast<Char>();
+    final grammarRootPtr = grammar.grammarRoot.toNativeUtf8().cast<Char>();
 
-    // Min-P filtering
-    if (config.minP > 0.0 && config.minP < 1.0) {
-      final minP = _llamaCpp.llama_sampler_init_min_p(config.minP, 1);
-      _llamaCpp.llama_sampler_chain_add(chain, minP);
-      debugPrint('  ✓ Added min-p sampler');
-    }
-
-    // Top-P (nucleus) filtering
-    if (config.topP < 1.0 && config.topP > 0.0) {
-      final topP = _llamaCpp.llama_sampler_init_top_p(config.topP, 1);
-      _llamaCpp.llama_sampler_chain_add(chain, topP);
-      debugPrint('  ✓ Added top-p sampler');
-    }
-  }
-
-  /// Add advanced sampling methods
-  void _addAdvancedSamplers(Pointer<llama_sampler> chain, AdvancedSamplerConfig config) {
-    // Typical sampling
-    if (config.useTypical) {
-      final typical = _llamaCpp.llama_sampler_init_typical(config.typicalP, config.typicalMinKeep);
-      _llamaCpp.llama_sampler_chain_add(chain, typical);
-      debugPrint('  ✓ Added typical sampler');
-    }
-
-    // XTC sampling
-    if (config.useXtc) {
-      final xtc = _llamaCpp.llama_sampler_init_xtc(
-        config.xtcProbability,
-        config.xtcThreshold,
-        config.xtcMinKeep,
-        config.useXtc ? DateTime.now().millisecondsSinceEpoch : 0,
-      );
-      _llamaCpp.llama_sampler_chain_add(chain, xtc);
-      debugPrint('  ✓ Added XTC sampler');
-    }
-  }
-
-  /// Add temperature scaling
-  void _addTemperatureSampler(Pointer<llama_sampler> chain, SamplerConfig config) {
-    if (config.temperature != 1.0) {
-      final temp = _llamaCpp.llama_sampler_init_temp(config.temperature);
-      _llamaCpp.llama_sampler_chain_add(chain, temp);
-      debugPrint('  ✓ Added temperature sampler');
-    }
-  }
-
-  /// Add final sampling method (Mirostat or distribution/greedy)
-  void _addFinalSampler(Pointer<llama_sampler> chain, SamplerConfig basicConfig, AdvancedSamplerConfig advancedConfig) {
-    if (advancedConfig.useMirostat) {
-      // Use Mirostat instead of regular sampling
-      final vocabSize = _llamaCpp.llama_n_vocab(_vocab);
-
-      if (advancedConfig.mirostatVersion == 1) {
-        final mirostat = _llamaCpp.llama_sampler_init_mirostat(
-          vocabSize,
-          basicConfig.seed == -1 ? DateTime.now().millisecondsSinceEpoch : basicConfig.seed,
-          advancedConfig.mirostatTau,
-          advancedConfig.mirostatEta,
-          advancedConfig.mirostatM,
-        );
-        _llamaCpp.llama_sampler_chain_add(chain, mirostat);
-        debugPrint('  ✓ Added Mirostat v1 sampler');
-      } else {
-        final mirostat = _llamaCpp.llama_sampler_init_mirostat_v2(
-          basicConfig.seed == -1 ? DateTime.now().millisecondsSinceEpoch : basicConfig.seed,
-          advancedConfig.mirostatTau,
-          advancedConfig.mirostatEta,
-        );
-        _llamaCpp.llama_sampler_chain_add(chain, mirostat);
-        debugPrint('  ✓ Added Mirostat v2 sampler');
+    try {
+      // Lazy grammar (with trigger words)
+      if (grammar.lazy && grammar.triggerWords != null && grammar.triggerWords!.isNotEmpty) {
+        return _createLazyGrammar(vocab, grammarStrPtr, grammarRootPtr, grammar.triggerWords!);
       }
-    } else {
-      // Regular distribution or greedy sampling
-      final finalSampler = basicConfig.temperature == 0.0
-          ? _llamaCpp.llama_sampler_init_greedy()
-          : _llamaCpp.llama_sampler_init_dist(
-              basicConfig.seed == -1 ? DateTime.now().millisecondsSinceEpoch : basicConfig.seed,
-            );
 
-      _llamaCpp.llama_sampler_chain_add(chain, finalSampler);
-      debugPrint('  ✓ Added final sampler (${basicConfig.temperature == 0.0 ? "greedy" : "distribution"})');
-    }
-  }
+      // Standard grammar (always active)
+      final grammarSampler = _llamaCpp.llama_sampler_init_grammar(vocab, grammarStrPtr, grammarRootPtr);
 
-  /// Log sampler configuration for debugging
-  void _logSamplerConfig(SamplerConfig basic, AdvancedSamplerConfig advanced) {
-    debugPrint('  Basic: temp=${basic.temperature}, top_p=${basic.topP}, top_k=${basic.topK}');
-    debugPrint('  Penalties: repeat=${basic.repeatPenalty}, freq=${basic.frequencyPenalty}');
-
-    if (advanced.useMirostat) {
-      debugPrint('  Mirostat v${advanced.mirostatVersion}: tau=${advanced.mirostatTau}, eta=${advanced.mirostatEta}');
-    }
-
-    if (advanced.useDry) {
-      debugPrint('  DRY: mult=${advanced.dryMultiplier}, base=${advanced.dryBase}');
-    }
-
-    if (advanced.useTypical) {
-      debugPrint('  Typical: p=${advanced.typicalP}');
-    }
-
-    if (advanced.useXtc) {
-      debugPrint('  XTC: prob=${advanced.xtcProbability}, thresh=${advanced.xtcThreshold}');
-    }
-  }
-}
-
-/// Sampler presets for different use cases
-class SamplerPresets {
-  /// High-quality creative writing with DRY and typical sampling
-  static const creative = (
-    basic: SamplerConfig(temperature: 0.8, topP: 0.95, topK: 50, repeatPenalty: 1.05),
-    advanced: AdvancedSamplerConfig(useDry: true, dryMultiplier: 0.8, dryBase: 1.75, useTypical: true, typicalP: 0.95),
-  );
-
-  /// Coherent, consistent output with Mirostat
-  static const coherent = (
-    basic: SamplerConfig(temperature: 0.7, topP: 0.9, repeatPenalty: 1.1),
-    advanced: AdvancedSamplerConfig(
-      useMirostat: true,
-      mirostatVersion: 2,
-      mirostatTau: 5.0,
-      mirostatEta: 0.1,
-      useDry: true,
-    ),
-  );
-
-  /// Exploratory output with XTC and variety
-  static const exploratory = (
-    basic: SamplerConfig(temperature: 0.9, topP: 0.95, topK: 60, repeatPenalty: 1.05),
-    advanced: AdvancedSamplerConfig(
-      useXtc: true,
-      xtcProbability: 0.1,
-      xtcThreshold: 0.1,
-      useTypical: true,
-      typicalP: 0.9,
-    ),
-  );
-
-  /// Precise, focused output for Q&A
-  static const precise = (
-    basic: SamplerConfig(temperature: 0.3, topP: 0.8, topK: 20, repeatPenalty: 1.15),
-    advanced: AdvancedSamplerConfig(useMirostat: true, mirostatVersion: 2, mirostatTau: 3.0, mirostatEta: 0.05),
-  );
-
-  /// Deterministic output for testing
-  static const deterministic = (
-    basic: SamplerConfig(
-      temperature: 0.0,
-      topK: 1,
-      repeatPenalty: 1.0,
-      seed: 42, // Fixed seed
-    ),
-    advanced: AdvancedSamplerConfig(),
-  );
-}
-
-/// Utility for analyzing and optimizing sampling parameters
-class SamplerAnalyzer {
-  /// Analyze text for repetition patterns
-  static RepetitionAnalysis analyzeRepetition(String text) {
-    final words = text.toLowerCase().split(RegExp(r'\W+'));
-    final wordCounts = <String, int>{};
-
-    for (final word in words) {
-      if (word.isNotEmpty) {
-        wordCounts[word] = (wordCounts[word] ?? 0) + 1;
+      if (grammarSampler == nullptr) {
+        throw LlamaException('Failed to initialize grammar sampler');
       }
+
+      return grammarSampler;
+    } finally {
+      malloc.free(grammarStrPtr);
+      malloc.free(grammarRootPtr);
     }
-
-    // Find repeated words
-    final repeated = wordCounts.entries.where((e) => e.value > 1).toList()..sort((a, b) => b.value.compareTo(a.value));
-
-    // Calculate repetition score
-    final totalWords = words.length;
-    final uniqueWords = wordCounts.length;
-    final repetitionScore = totalWords > 0 ? 1.0 - (uniqueWords / totalWords) : 0.0;
-
-    return RepetitionAnalysis(
-      totalWords: totalWords,
-      uniqueWords: uniqueWords,
-      repetitionScore: repetitionScore,
-      mostRepeated: repeated.take(10).toList(),
-    );
   }
 
-  /// Suggest optimal sampling parameters based on text analysis
-  static SamplerConfig suggestParameters(String sampleText) {
-    final analysis = analyzeRepetition(sampleText);
+  /// Internal: Create lazy grammar sampler (activates on trigger words)
+  Pointer<llama_sampler> _createLazyGrammar(
+    Pointer<llama_vocab> vocab,
+    Pointer<Char> grammarStr,
+    Pointer<Char> grammarRoot,
+    List<String> triggerWords,
+  ) {
+    final numWords = triggerWords.length;
+    final triggerWordsPtr = malloc<Pointer<Char>>(numWords);
 
-    // High repetition -> increase penalties and use DRY
-    if (analysis.repetitionScore > 0.3) {
-      return const SamplerConfig(
-        temperature: 0.7,
-        topP: 0.9,
-        repeatPenalty: 1.2,
-        frequencyPenalty: 0.1,
-        presencePenalty: 0.1,
+    try {
+      // Convert trigger words to native pointers
+      for (int i = 0; i < numWords; i++) {
+        triggerWordsPtr[i] = triggerWords[i].toNativeUtf8().cast<Char>();
+      }
+
+      final grammarSampler = _llamaCpp.llama_sampler_init_grammar_lazy(
+        vocab,
+        grammarStr,
+        grammarRoot,
+        triggerWordsPtr,
+        numWords,
+        nullptr, // trigger_tokens (not used)
+        0,
       );
-    }
 
-    // Low repetition -> can use more creative settings
-    if (analysis.repetitionScore < 0.1) {
-      return const SamplerConfig(temperature: 0.8, topP: 0.95, repeatPenalty: 1.05);
-    }
+      if (grammarSampler == nullptr) {
+        throw LlamaException('Failed to initialize lazy grammar sampler');
+      }
 
-    // Balanced
-    return SamplerConfig.balanced;
+      return grammarSampler;
+    } finally {
+      // Free trigger word strings
+      for (int i = 0; i < numWords; i++) {
+        malloc.free(triggerWordsPtr[i]);
+      }
+      malloc.free(triggerWordsPtr);
+    }
   }
 
-  /// Estimate optimal context size based on text patterns
-  static int suggestContextSize(List<String> sampleTexts) {
-    if (sampleTexts.isEmpty) return 2048;
+  /// Get the current sampler chain (if created)
+  Pointer<llama_sampler>? get sampler => _sampler;
 
-    final avgLength = sampleTexts.map((t) => t.length).reduce((a, b) => a + b) / sampleTexts.length;
+  /// Check if sampler has been created
+  bool get hasSampler => _sampler != null && _sampler != nullptr;
 
-    // Rough estimate: 4 characters per token, with 2x buffer
-    final estimatedTokens = (avgLength / 4 * 2).round();
-
-    // Round up to common context sizes
-    if (estimatedTokens <= 1024) return 1024;
-    if (estimatedTokens <= 2048) return 2048;
-    if (estimatedTokens <= 4096) return 4096;
-    if (estimatedTokens <= 8192) return 8192;
-    return 16384;
+  void dispose() {
+    if (_sampler != null && _sampler != nullptr) {
+      _llamaCpp.llama_sampler_free(_sampler!);
+      _sampler = null;
+      LlamaLogger.info('✓ Sampler disposed');
+    }
+    markDisposed();
   }
 }
 
-/// Analysis result for text repetition patterns
-class RepetitionAnalysis {
-  final int totalWords;
-  final int uniqueWords;
-  final double repetitionScore; // 0.0 = no repetition, 1.0 = all repeated
-  final List<MapEntry<String, int>> mostRepeated;
-
-  const RepetitionAnalysis({
-    required this.totalWords,
-    required this.uniqueWords,
-    required this.repetitionScore,
-    required this.mostRepeated,
-  });
-
-  /// Whether text has high repetition
-  bool get hasHighRepetition => repetitionScore > 0.3;
-
-  /// Whether text has low repetition (very diverse)
-  bool get hasLowRepetition => repetitionScore < 0.1;
-
-  @override
-  String toString() {
-    return 'RepetitionAnalysis(total: $totalWords, unique: $uniqueWords, '
-        'score: ${repetitionScore.toStringAsFixed(3)})';
+/// Helper extension for creating samplers from existing presets
+extension SamplerParamsExtension on SamplerParams {
+  /// Convert to a human-readable description
+  String describe() {
+    return 'SamplerParams(temp: $temp, topK: $topK, topP: $topP, minP: $minP)';
   }
+
+  /// Check if this is deterministic sampling
+  bool get isDeterministic => temp <= 0.0 || topK == 1;
+
+  /// Check if this is high-temperature (creative) sampling
+  bool get isCreative => temp >= 0.85;
 }

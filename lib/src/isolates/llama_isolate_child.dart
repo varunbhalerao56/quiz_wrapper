@@ -3,7 +3,7 @@
 /// This runs on a background isolate and processes commands from the parent.
 /// All heavy computation (tokenization, generation) happens here.
 
-// ignore_for_file: dangling_library_doc_comments
+/// ignore_for_file: dangling_library_doc_comments
 
 import 'dart:isolate';
 
@@ -122,14 +122,21 @@ class LlamaIsolateChild {
     final result = await _llama.generateEnhanced(cmd.prompt, config: cmd.config, systemPrompt: cmd.systemPrompt);
 
     if (_shouldStop) {
-      _sendResponse(CompleteResponse(requestId: cmd.requestId, tokensGenerated: 0));
+      _sendResponse(
+        CompleteResponse(requestId: cmd.requestId, tokensGenerated: 0, metricsJson: result?.metrics?.toJson()),
+      );
       _sendResponse(StatusResponse(IsolateStatus.ready));
       return;
     }
 
     if (result != null) {
       _sendResponse(
-        CompleteResponse(result: result.text, requestId: cmd.requestId, tokensGenerated: result.tokensGenerated),
+        CompleteResponse(
+          result: result.text,
+          requestId: cmd.requestId,
+          tokensGenerated: result.tokensGenerated,
+          metricsJson: result.metrics?.toJson(),
+        ),
       );
     } else {
       _sendResponse(ErrorResponse('Generation failed', requestId: cmd.requestId));
@@ -158,6 +165,9 @@ class LlamaIsolateChild {
           case TokenEvent(:final token):
             _sendResponse(TokenResponse(token: token, requestId: cmd.requestId));
             tokenCount++;
+
+          case MetricsEvent(:final metrics): // ✅ ADD THIS CASE
+            _sendResponse(MetricsResponse(metricsJson: metrics.toJson(), requestId: cmd.requestId));
 
           case DoneEvent(:final tokensGenerated):
             tokenCount = tokensGenerated; // Use accurate count from generator

@@ -10,6 +10,8 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
+import 'package:quiz_wrapper/src/generation/llama_sampler.dart';
+import 'package:quiz_wrapper/src/utils/llama_helpers.dart';
 import 'ffi/llama_ffi.dart';
 import 'utils/llama_config.dart';
 
@@ -32,6 +34,8 @@ class LlamaServiceEnhanced {
   Pointer<llama_context>? _context;
   Pointer<llama_vocab>? _vocab;
   Pointer<llama_sampler>? _sampler;
+  LlamaSampler? _samplerManager;
+  PerformanceMonitor? _perfMonitor;
   bool _initialized = false;
 
   LlamaServiceEnhanced() {
@@ -141,6 +145,12 @@ class LlamaServiceEnhanced {
       return false;
     }
 
+    _samplerManager = LlamaSampler(_llamaCpp);
+    _debugPrint('✓ Sampler manager initialized');
+
+    _perfMonitor = PerformanceMonitor(_llamaCpp);
+    _debugPrint('✓ Performance monitor initialized');
+
     final actualCtx = _llamaCpp.llama_n_ctx(_context!);
     _debugPrint('✓ Context created! Actual n_ctx: $actualCtx');
 
@@ -148,64 +158,33 @@ class LlamaServiceEnhanced {
   }
 
   /// Create a configurable sampler chain
+  /// Create sampler chain using new LlamaSampler (with optional grammar)
   Pointer<llama_sampler> _createConfigurableSampler(SamplerConfig config) {
     _debugPrint('Creating sampler chain with config: $config');
 
-    final samplerParams = _llamaCpp.llama_sampler_chain_default_params();
-    samplerParams.no_perf = false;
-    final chain = _llamaCpp.llama_sampler_chain_init(samplerParams);
-
-    // Add samplers in the correct order
-
-    // 1. Penalties first
-    if (config.repeatPenalty != 1.0 || config.frequencyPenalty != 0.0 || config.presencePenalty != 0.0) {
-      final penalties = _llamaCpp.llama_sampler_init_penalties(
-        64, // penalty_last_n
-        config.repeatPenalty,
-        config.frequencyPenalty,
-        config.presencePenalty,
-      );
-      _llamaCpp.llama_sampler_chain_add(chain, penalties);
-      _debugPrint('  ✓ Added penalties sampler');
+    // ✅ REPLACE ENTIRE METHOD BODY WITH THIS:
+    if (_samplerManager == null) {
+      throw StateError('Sampler manager not initialized');
     }
 
-    // 2. Top-K filtering
-    if (config.topK > 0 && config.topK < 1000) {
-      final topK = _llamaCpp.llama_sampler_init_top_k(config.topK);
-      _llamaCpp.llama_sampler_chain_add(chain, topK);
-      _debugPrint('  ✓ Added top-k=${config.topK} sampler');
-    }
+    // Convert SamplerConfig to SamplerParams
+    final params = SamplerParams(
+      seed: config.seed == -1 ? DateTime.now().millisecondsSinceEpoch : config.seed,
+      temp: config.temperature,
+      topK: config.topK,
+      topP: config.topP,
+      minP: config.minP,
+      penaltyRepeat: config.repeatPenalty,
+      penaltyFreq: config.frequencyPenalty,
+      penaltyPresent: config.presencePenalty,
+    );
 
-    // 3. Min-P filtering
-    if (config.minP > 0.0 && config.minP < 1.0) {
-      final minP = _llamaCpp.llama_sampler_init_min_p(config.minP, 1);
-      _llamaCpp.llama_sampler_chain_add(chain, minP);
-      _debugPrint('  ✓ Added min-p=${config.minP} sampler');
-    }
-
-    // 4. Top-P filtering
-    if (config.topP < 1.0 && config.topP > 0.0) {
-      final topP = _llamaCpp.llama_sampler_init_top_p(config.topP, 1);
-      _llamaCpp.llama_sampler_chain_add(chain, topP);
-      _debugPrint('  ✓ Added top-p=${config.topP} sampler');
-    }
-
-    // 5. Temperature scaling
-    if (config.temperature != 1.0) {
-      final temp = _llamaCpp.llama_sampler_init_temp(config.temperature);
-      _llamaCpp.llama_sampler_chain_add(chain, temp);
-      _debugPrint('  ✓ Added temperature=${config.temperature} sampler');
-    }
-
-    // 6. Final sampling method
-    final finalSampler = config.temperature == 0.0
-        ? _llamaCpp.llama_sampler_init_greedy()
-        : _llamaCpp.llama_sampler_init_dist(config.seed == -1 ? DateTime.now().millisecondsSinceEpoch : config.seed);
-
-    _llamaCpp.llama_sampler_chain_add(chain, finalSampler);
-    _debugPrint('  ✓ Added final sampler (${config.temperature == 0.0 ? "greedy" : "dist"})');
-
-    return chain;
+    // Create sampler with optional grammar
+    return _samplerManager!.createSamplerChain(
+      vocab: _vocab!,
+      params: params,
+      grammar: config.grammar, // ✅ Grammar is automatically applied!
+    );
   }
 
   /// Enhanced generate method with full configuration support
@@ -235,30 +214,6 @@ $systemPrompt
 $prompt
 <|assistant|>
 ''';
-
-    //     //Phi-3-mini-4k-instruct-q4.gguf
-    //     final formattedPrompt =
-    //         '''
-    // <|system|>
-    // $systemPrompt
-    // <|user|>
-    // $prompt
-    // <|assistant|>
-    // ''';
-
-    //     final formattedPrompt =
-    //         '''
-    // <|begin_of_text|>
-
-    // Your name is Gemma.
-    // The following is a conversation between a user and an AI assistant.
-    // The assistant always replies concisely and politely in plain English.
-
-    // If the user greets the assistant, greet back. Do not change the topic.
-
-    // User: $prompt
-    // Assistant (reply directly to the user without changing topic):
-    // ''';
 
     // Tokenize the prompt
     final tokens = tokenizeText(formattedPrompt);
@@ -321,7 +276,12 @@ $prompt
               if (currentText.contains(stopString)) {
                 _debugPrint('✓ Hit stop string: "$stopString" at position $nDecoded');
                 final index = currentText.indexOf(stopString);
-                return GenerationResult(currentText.substring(0, index), nDecoded);
+
+                // ✅ ADD METRICS BEFORE RETURNING:
+                final metrics = _perfMonitor?.getContextPerformance(_context!);
+                _debugPrint('$metrics');
+
+                return GenerationResult(currentText.substring(0, index), nDecoded, metrics);
               }
             }
           }
@@ -345,7 +305,11 @@ $prompt
 
       _debugPrint('=== Generation complete: $nDecoded tokens ===\n');
 
-      return GenerationResult(result.toString(), nDecoded);
+      // ✅ ADD THIS: Get metrics from llama.cpp
+      final metrics = _perfMonitor?.getContextPerformance(_context!);
+      _debugPrint('$metrics');
+
+      return GenerationResult(result.toString(), nDecoded, metrics);
     } finally {
       malloc.free(tokensPtr);
     }
@@ -473,15 +437,6 @@ $prompt
 <|assistant|>
 ''';
 
-    //     final formattedPrompt =
-    //         '''
-    // <|system|>
-    // $systemPrompt
-    // <|user|>
-    // $prompt
-    // <|assistant|>
-    // ''';
-
     try {
       final tokens = tokenizeText(formattedPrompt);
       if (tokens.isEmpty) {
@@ -539,6 +494,13 @@ $prompt
               for (final stopString in config.stopStrings) {
                 if (currentText.contains(stopString)) {
                   _debugPrint('✓ Streaming complete: stop string "$stopString" at $nDecoded');
+
+                  // ✅ ADD THESE 4 LINES:
+                  final metrics = _perfMonitor?.getContextPerformance(_context!);
+                  if (metrics != null) {
+                    yield MetricsEvent(metrics); // ✅ Yield metrics before done
+                  }
+
                   yield DoneEvent(nDecoded); // Yield done event with count
                   return;
                 }
@@ -558,6 +520,11 @@ $prompt
           }
 
           _debugPrint('=== Streaming complete: $nDecoded tokens ===');
+          final metrics = _perfMonitor?.getContextPerformance(_context!);
+          if (metrics != null) {
+            yield MetricsEvent(metrics); // ✅ Yield metrics before done
+          }
+
           yield DoneEvent(nDecoded); // Yield final done event
         } finally {
           malloc.free(singleTokenPtr);
@@ -573,6 +540,12 @@ $prompt
   /// Clean up resources
   void dispose() {
     _debugPrint('Disposing resources...');
+
+    if (_samplerManager != null) {
+      _samplerManager!.dispose();
+      _samplerManager = null;
+      _debugPrint('  ✓ Sampler manager disposed');
+    }
 
     if (_sampler != null && _sampler!.address != 0) {
       _llamaCpp.llama_sampler_free(_sampler!);

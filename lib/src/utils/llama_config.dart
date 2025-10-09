@@ -7,6 +7,8 @@
 
 import 'dart:convert';
 
+import 'package:quiz_wrapper/src/utils/llama_helpers.dart';
+
 sealed class StreamEvent {}
 
 class TokenEvent extends StreamEvent {
@@ -19,11 +21,17 @@ class DoneEvent extends StreamEvent {
   DoneEvent(this.tokensGenerated);
 }
 
+class MetricsEvent extends StreamEvent {
+  final PerformanceMetrics metrics;
+  MetricsEvent(this.metrics);
+}
+
 class GenerationResult {
   final String text;
   final int tokensGenerated;
+  final PerformanceMetrics? metrics;
 
-  GenerationResult(this.text, this.tokensGenerated);
+  GenerationResult(this.text, this.tokensGenerated, this.metrics);
 }
 
 /// Configuration for sampling parameters with JSON serialization
@@ -38,6 +46,7 @@ class SamplerConfig {
   final List<String> stopStrings;
   final int maxTokens;
   final int seed;
+  final GrammarConfig? grammar;
 
   const SamplerConfig({
     this.temperature = 0.7,
@@ -50,6 +59,7 @@ class SamplerConfig {
     this.stopStrings = const [],
     this.maxTokens = 100,
     this.seed = -1, // -1 = random seed
+    this.grammar,
   });
 
   // Preset configurations
@@ -70,6 +80,7 @@ class SamplerConfig {
     List<String>? stopStrings,
     int? maxTokens,
     int? seed,
+    GrammarConfig? grammar,
   }) {
     return SamplerConfig(
       temperature: temperature ?? this.temperature,
@@ -82,6 +93,7 @@ class SamplerConfig {
       stopStrings: stopStrings ?? this.stopStrings,
       maxTokens: maxTokens ?? this.maxTokens,
       seed: seed ?? this.seed,
+      grammar: grammar ?? this.grammar,
     );
   }
 
@@ -98,6 +110,7 @@ class SamplerConfig {
       'stopStrings': stopStrings,
       'maxTokens': maxTokens,
       'seed': seed,
+      'grammar': grammar?.toJson(),
     };
   }
 
@@ -114,6 +127,7 @@ class SamplerConfig {
       stopStrings: (json['stopStrings'] as List?)?.cast<String>() ?? const [],
       maxTokens: json['maxTokens'] as int? ?? 100,
       seed: json['seed'] as int? ?? -1,
+      grammar: json['grammar'] != null ? GrammarConfig.fromJson(json['grammar']) : null,
     );
   }
 
@@ -128,7 +142,7 @@ class SamplerConfig {
   @override
   String toString() {
     return 'SamplerConfig(temp: $temperature, top_p: $topP, top_k: $topK, '
-        'min_p: $minP, repeat: $repeatPenalty, max: $maxTokens)';
+        'min_p: $minP, repeat: $repeatPenalty, max: $maxTokens, grammar: $grammar)';
   }
 }
 
@@ -463,5 +477,87 @@ class LlamaServiceConfig {
   /// Create from JSON string
   factory LlamaServiceConfig.fromJsonString(String jsonString) {
     return LlamaServiceConfig.fromJson(jsonDecode(jsonString));
+  }
+}
+
+/// Grammar configuration for constrained generation
+///
+/// Grammars use GBNF (GGML BNF) notation to define valid output structures.
+/// This ensures the model can ONLY generate text matching the grammar rules.
+class GrammarConfig {
+  final String grammarStr;
+  final String grammarRoot;
+  final bool lazy;
+  final List<String>? triggerWords;
+
+  const GrammarConfig({required this.grammarStr, this.grammarRoot = 'root', this.lazy = false, this.triggerWords});
+
+  /// Standard JSON grammar - ensures valid JSON output
+  static const json = GrammarConfig(
+    grammarRoot: 'root',
+    grammarStr: '''
+root ::= object
+object ::= "{" ws members? ws "}"
+members ::= pair (ws "," ws pair)*
+pair ::= string ws ":" ws value
+value ::= string | number | object | array | "true" | "false" | "null"
+array ::= "[" ws (value (ws "," ws value)*)? ws "]"
+string ::= "\\"" char* "\\""
+char ::= [^"\\\\] | "\\\\" escape
+escape ::= ["\\\\/bfnrt] | "u" [0-9a-fA-F]{4}
+number ::= integer fraction? exponent?
+integer ::= "-"? ("0" | [1-9] [0-9]*)
+fraction ::= "." [0-9]+
+exponent ::= [eE] [+-]? [0-9]+
+ws ::= [ \\t\\n\\r]*
+''',
+  );
+
+  /// Convert to JSON
+  Map<String, dynamic> toJson() {
+    return {'grammarStr': grammarStr, 'grammarRoot': grammarRoot, 'lazy': lazy, 'triggerWords': triggerWords};
+  }
+
+  /// Create from JSON
+  factory GrammarConfig.fromJson(Map<String, dynamic> json) {
+    return GrammarConfig(
+      grammarStr: json['grammarStr'],
+      grammarRoot: json['grammarRoot'],
+      lazy: json['lazy'],
+      triggerWords: json['triggerWords'],
+    );
+  }
+
+  /// Convert to JSON string
+  String toJsonString() => jsonEncode(toJson());
+
+  /// Create from JSON string
+  factory GrammarConfig.fromJsonString(String jsonString) {
+    return GrammarConfig.fromJson(jsonDecode(jsonString));
+  }
+
+  @override
+  String toString() {
+    return 'GrammarConfig(grammarStr: $grammarStr, grammarRoot: $grammarRoot, lazy: $lazy, triggerWords: $triggerWords)';
+  }
+
+  /// Create a copy with modified parameters
+  GrammarConfig copyWith({String? grammarStr, String? grammarRoot, bool? lazy, List<String>? triggerWords}) {
+    return GrammarConfig(
+      grammarStr: grammarStr ?? this.grammarStr,
+      grammarRoot: grammarRoot ?? this.grammarRoot,
+      lazy: lazy ?? this.lazy,
+      triggerWords: triggerWords ?? this.triggerWords,
+    );
+  }
+
+  /// Create custom grammar from string
+  factory GrammarConfig.custom({
+    required String rules,
+    String root = 'root',
+    bool lazy = false,
+    List<String>? triggerWords,
+  }) {
+    return GrammarConfig(grammarStr: rules, grammarRoot: root, lazy: lazy, triggerWords: triggerWords);
   }
 }

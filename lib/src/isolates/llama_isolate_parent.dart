@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'package:quiz_wrapper/src/isolates/llama_isolate_child.dart';
 import 'package:quiz_wrapper/src/isolates/llama_isolate_types.dart';
 import 'package:quiz_wrapper/src/utils/llama_config.dart';
+import 'package:quiz_wrapper/src/utils/llama_helpers.dart';
 
 /// Parent service that manages communication with the LlamaChild isolate
 class LlamaIsolateParent {
@@ -93,13 +94,19 @@ class LlamaIsolateParent {
           _closeStream(requestId);
         }
 
-      case CompleteResponse(:final result, :final requestId, :final tokensGenerated):
+      case CompleteResponse(:final result, :final requestId, :final tokensGenerated, :final metrics):
         debugPrint('[LlamaParent] ✓ Complete: $tokensGenerated tokens (request: $requestId)');
+        if (metrics != null) {
+          debugPrint('[LlamaParent] 📊 Metrics: $metrics');
+        }
         _completeRequest(requestId, result);
         _closeStream(requestId);
 
       case TokenResponse(:final token, :final requestId):
         _streamToken(requestId, token);
+
+      case MetricsResponse(:final metrics, :final requestId):
+        _streamMetrics(requestId, metrics);
     }
   }
 
@@ -272,6 +279,12 @@ class LlamaIsolateParent {
     if (controller != null && !controller.isClosed) {
       controller.add(token);
     }
+  }
+
+  void _streamMetrics(String requestId, PerformanceMetrics metrics) {
+    // Metrics are logged here but not streamed (they come in CompleteResponse)
+    debugPrint('[LlamaParent] 📊 Metrics: ${metrics.toString()}');
+    // Note: For streaming, metrics are available when generation completes
   }
 
   void _closeStream(String requestId) {

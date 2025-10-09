@@ -205,52 +205,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     final systemPrompt = '''
-You are a strict JSON parser for quiz text.
-
-Always reply with one JSON object in this exact structure:
-{
-  "questions": [
-    {
-      "id": number,
-      "question": string,
-      "options": [string],
-      "answer": string or [string] or object,
-      "explanation": string,
-      "type": string
-    }
-  ]
-}
-
-Rules:
-- Output ONLY JSON (no markdown, no prose, no comments).
-- Use double quotes for all strings.
-- Keys must be lowercase.
-- IDs start at 1.
-- Remove numbering like "1." or "2)" from question text.
-- If options have labels (A), (B), etc., remove them and keep only the text.
-- If no options exist, set "options": [].
-- If no answer is provided in the text, set "answer": "".
-- If no explanation is provided, set "explanation": "".
-- Detect "true/false" questions as type "true_false".
-- Detect ordering questions as type "arrange".
-- Detect matching pairs as type "match".
-- Otherwise, use "multiple_choice".
-- For "match" type questions:
-  - If the question presents pairs like "Concept = Description", "Concept - Description", or "Concept: Description",
-    then:
-      • Store all pairs inside "options" as a map (object) where each key is the left term, and each value is the right description.
-      • If a right-hand description is missing (like "Widget = ??"), store an empty string ("").
-  - Use the same structure for "answer" if correct mappings are known or provided.
-  - Example:
-    "options": {
-      "Widget": "",
-      "Hot Reload": "updates UI instantly",
-      "BuildContext": "defines tree location",
-      "State": "maintains data changes"
-    }
-
-- If parsing fails or data cannot be structured, return:
-  {"error": "Cannot parse into quiz model."}
 ''';
 
     try {

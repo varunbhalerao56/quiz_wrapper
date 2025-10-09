@@ -1,11 +1,11 @@
 import 'package:quiz_wrapper/src/utils/llama_config.dart';
+import 'package:quiz_wrapper/src/utils/llama_helpers.dart';
 
 /// Type-safe message definitions for isolate communication
 ///
 /// Uses sealed classes for compile-time exhaustiveness checking
 
 // ignore_for_file: dangling_library_doc_comments
-
 
 // ============================================================================
 // COMMANDS - Sent from UI thread to isolate
@@ -95,13 +95,33 @@ class TokenResponse extends LlamaResponse {
   TokenResponse({required this.token, required this.requestId});
 }
 
+/// A metrics event was generated (streaming)
+class MetricsResponse extends LlamaResponse {
+  final Map<String, dynamic> metricsJson; // ✅ JSON for isolate transfer
+  final String requestId;
+
+  MetricsResponse({required this.metricsJson, required this.requestId});
+
+  // ✅ Helper to reconstruct metrics
+  PerformanceMetrics get metrics => PerformanceMetrics.fromJson(metricsJson);
+}
+
 /// Generation completed
 class CompleteResponse extends LlamaResponse {
-  final String? result; // null for streaming (tokens already sent)
+  final String? result;
   final String requestId;
   final int tokensGenerated;
+  final Map<String, dynamic>? metricsJson; // ✅ ADD THIS
 
-  CompleteResponse({this.result, required this.requestId, required this.tokensGenerated});
+  CompleteResponse({
+    this.result,
+    required this.requestId,
+    required this.tokensGenerated,
+    this.metricsJson, // ✅ ADD THIS
+  });
+
+  // ✅ ADD: Helper to get metrics
+  PerformanceMetrics? get metrics => metricsJson != null ? PerformanceMetrics.fromJson(metricsJson!) : null;
 }
 
 /// Status update
