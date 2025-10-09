@@ -157,6 +157,56 @@ class LlamaServiceEnhanced {
     return true;
   }
 
+  /// Get model metadata information
+  /// Get model metadata information
+  LlamaModelInfo getModelInfo() {
+    if (_model == null || _model!.address == 0) {
+      throw StateError('Model not loaded. Call loadModel() first.');
+    }
+
+    if (_vocab == null || _vocab!.address == 0) {
+      throw StateError('Vocab not available. Call loadModel() first.');
+    }
+
+    try {
+      _debugPrint('Extracting model info...');
+
+      // Extract metadata using llama.cpp FFI functions
+      // Use _vocab for vocab size (not _model!)
+      final vocabSize = _llamaCpp.llama_vocab_n_tokens(_vocab!);
+      final contextSize = _llamaCpp.llama_model_n_ctx_train(_model!);
+      final embeddingSize = _llamaCpp.llama_n_embd(_model!);
+      final numLayers = _llamaCpp.llama_n_layer(_model!);
+
+      // Get model architecture name
+      final archBuffer = malloc<Char>(256);
+      try {
+        _llamaCpp.llama_model_desc(_model!, archBuffer, 256);
+        final architecture = archBuffer.cast<Utf8>().toDartString();
+
+        // Estimate parameter count (rough approximation)
+        final numParams = embeddingSize * embeddingSize * numLayers * 12;
+
+        final info = LlamaModelInfo(
+          vocabSize: vocabSize,
+          contextSize: contextSize,
+          embeddingSize: embeddingSize,
+          numLayers: numLayers,
+          architecture: architecture,
+          numParams: numParams,
+        );
+
+        _debugPrint('✓ Model info extracted: $info');
+        return info;
+      } finally {
+        malloc.free(archBuffer);
+      }
+    } catch (e) {
+      _debugPrint('✗ Failed to extract model info: $e');
+      rethrow;
+    }
+  }
+
   /// Create a configurable sampler chain
   /// Create sampler chain using new LlamaSampler (with optional grammar)
   Pointer<llama_sampler> _createConfigurableSampler(SamplerConfig config) {
@@ -194,6 +244,8 @@ class LlamaServiceEnhanced {
     String? systemPrompt = 'You are a helpful, concise assistant.',
   }) async {
     config ??= const SamplerConfig();
+
+    final stopChecker = StopStringChecker(config.stopStrings);
 
     if (_context == null || _context!.address == 0) {
       _debugPrint('✗ Cannot generate: context not created');
@@ -270,19 +322,18 @@ $prompt
           result.write(tokenText);
 
           // Check for stop strings
-          if (config.stopStrings.isNotEmpty) {
+          if (stopChecker.hasStopStrings) {
             final currentText = result.toString();
-            for (final stopString in config.stopStrings) {
-              if (currentText.contains(stopString)) {
-                _debugPrint('✓ Hit stop string: "$stopString" at position $nDecoded');
-                final index = currentText.indexOf(stopString);
+            final checkResult = stopChecker.checkAndClean(currentText);
 
-                // ✅ ADD METRICS BEFORE RETURNING:
-                final metrics = _perfMonitor?.getContextPerformance(_context!);
-                _debugPrint('$metrics');
+            if (checkResult.stopped) {
+              _debugPrint('✓ Hit stop string: "${checkResult.stopString}" at position $nDecoded');
 
-                return GenerationResult(currentText.substring(0, index), nDecoded, metrics);
-              }
+              // Get metrics before returning
+              final metrics = _perfMonitor?.getContextPerformance(_context!);
+              _debugPrint('$metrics');
+
+              return GenerationResult(checkResult.text, nDecoded, metrics);
             }
           }
 
@@ -416,6 +467,8 @@ $prompt
   }) async* {
     config ??= const SamplerConfig();
 
+    final stopChecker = StopStringChecker(config.stopStrings);
+
     if (_context == null || _context!.address == 0) {
       _debugPrint('✗ Cannot stream: context not created');
       return;
@@ -489,21 +542,21 @@ $prompt
             yield TokenEvent(tokenText); // Yield token event
 
             // Check stop strings
-            if (config.stopStrings.isNotEmpty) {
+            if (stopChecker.hasStopStrings) {
               final currentText = result.toString();
-              for (final stopString in config.stopStrings) {
-                if (currentText.contains(stopString)) {
-                  _debugPrint('✓ Streaming complete: stop string "$stopString" at $nDecoded');
+              final checkResult = stopChecker.checkAndClean(currentText);
 
-                  // ✅ ADD THESE 4 LINES:
-                  final metrics = _perfMonitor?.getContextPerformance(_context!);
-                  if (metrics != null) {
-                    yield MetricsEvent(metrics); // ✅ Yield metrics before done
-                  }
+              if (checkResult.stopped) {
+                _debugPrint('✓ Streaming complete: stop string "${checkResult.stopString}" at $nDecoded');
 
-                  yield DoneEvent(nDecoded); // Yield done event with count
-                  return;
+                // ✅ ADD THESE 4 LINES:
+                final metrics = _perfMonitor?.getContextPerformance(_context!);
+                if (metrics != null) {
+                  yield MetricsEvent(metrics); // ✅ Yield metrics before done
                 }
+
+                yield DoneEvent(nDecoded); // Yield done event with count
+                return;
               }
             }
 

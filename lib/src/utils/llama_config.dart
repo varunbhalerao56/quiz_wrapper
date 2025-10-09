@@ -561,3 +561,4 @@ ws ::= [ \\t\\n\\r]*
     return GrammarConfig(grammarStr: rules, grammarRoot: root, lazy: lazy, triggerWords: triggerWords);
   }
 }
+

@@ -324,6 +324,41 @@ class TextProcessor {
   }
 }
 
+/// Model metadata extracted from llama.cpp
+class LlamaModelInfo {
+  final int vocabSize;
+  final int contextSize;
+  final int embeddingSize;
+  final int numLayers;
+  final String architecture;
+  final int numParams;
+
+  const LlamaModelInfo({
+    required this.vocabSize,
+    required this.contextSize,
+    required this.embeddingSize,
+    required this.numLayers,
+    required this.architecture,
+    required this.numParams,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'vocabSize': vocabSize,
+    'contextSize': contextSize,
+    'embeddingSize': embeddingSize,
+    'numLayers': numLayers,
+    'architecture': architecture,
+    'numParams': numParams,
+  };
+
+  @override
+  String toString() {
+    return 'LlamaModelInfo(vocab: $vocabSize, ctx: $contextSize, '
+        'embd: $embeddingSize, layers: $numLayers, arch: $architecture, '
+        'params: ${(numParams / 1e9).toStringAsFixed(2)}B)';
+  }
+}
+
 /// System information and capability detection
 class SystemInfo {
   /// Check if Metal (GPU) acceleration is available on macOS
@@ -627,4 +662,52 @@ class LlamaBenchmark {
 
     return results;
   }
+}
+
+/// Enhanced stop string detection with buffer-based suffix matching
+///
+/// Handles stop sequences that may span multiple tokens by checking
+/// if the accumulated text ends with any stop string.
+class StopStringChecker {
+  final List<String> stopStrings;
+
+  StopStringChecker(this.stopStrings);
+
+  /// Check if the accumulated text ends with any stop string
+  /// Returns the stop string if found, null otherwise
+  String? check(String text) {
+    if (stopStrings.isEmpty) return null;
+
+    for (final stopString in stopStrings) {
+      if (stopString.isEmpty) continue;
+
+      if (text.endsWith(stopString)) {
+        return stopString;
+      }
+    }
+    return null;
+  }
+
+  /// Remove stop string from the end of text if present
+  String removeStopString(String text, String stopString) {
+    if (text.endsWith(stopString)) {
+      return text.substring(0, text.length - stopString.length);
+    }
+    return text;
+  }
+
+  /// Check and clean in one operation
+  /// Returns cleaned text and whether a stop string was found
+  ({String text, bool stopped, String? stopString}) checkAndClean(String text) {
+    final foundStopString = check(text);
+
+    if (foundStopString != null) {
+      return (text: removeStopString(text, foundStopString), stopped: true, stopString: foundStopString);
+    }
+
+    return (text: text, stopped: false, stopString: null);
+  }
+
+  /// Check if we have any stop strings configured
+  bool get hasStopStrings => stopStrings.isNotEmpty;
 }
