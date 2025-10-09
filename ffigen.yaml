@@ -1,0 +1,35 @@
+output: lib/src/ffi/llama_ffi.dart
+name: llama_cpp
+description: "FFI bindings to llama.cpp C API"
+
+headers:
+    entry-points:
+        # The canonical C header that exposes the llama.cpp API
+        - third_party/llama.cpp/include/llama.h
+    include-directives:
+        # Include both top-level and ggml headers so dependencies resolve
+        - third_party/llama.cpp/include/**
+        - third_party/llama.cpp/ggml/include/**
+
+compiler-opts:
+    # Include directories so ggml.h and friends are found
+    - "-Ithird_party/llama.cpp/include"
+    - "-Ithird_party/llama.cpp/ggml/include"
+    # Optional: if you’ve done `cmake --install`
+    - "-Ithird_party/llama.cpp/install/include"
+
+functions:
+    include:
+        - "^llama_.*"
+structs:
+    include:
+        - "^llama_.*"
+enums:
+    include:
+        - "^llama_.*"
+globals:
+    include:
+        - "^llama_.*"
+
+# Quiet the enum size warnings
+silence-enum-warning: true

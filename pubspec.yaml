@@ -1,0 +1,32 @@
+name: quiz_wrapper
+description: "A new Flutter project."
+publish_to: "none"
+version: 0.1.0
+
+environment:
+    sdk: ^3.8.0
+
+dependencies:
+    flutter:
+        sdk: flutter
+
+    path_provider: ^2.1.5
+    path: ^1.9.1
+    ffi: ^2.1.4
+    system_info2: ^4.1.0
+    hooks: ^0.20.2
+    code_assets: ^0.19.7
+    ffigen: ^19.1.0
+
+dev_dependencies:
+    flutter_test:
+        sdk: flutter
+    flutter_lints: ^5.0.0
+
+flutter:
+    uses-material-design: true
+
+    assets:
+        - assets/Phi-3-mini-4k-instruct-q4.gguf
+        - assets/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+        - assets/gemma-3-4b-it-Q4_K_M.gguf
