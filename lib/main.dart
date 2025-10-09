@@ -267,8 +267,6 @@ class _MyHomePageState extends State<MyHomePage> {
       _generateStatus = 'Testing advanced generation...';
     });
 
-    await Future.delayed(Duration(milliseconds: 100));
-
     try {
       // Test 1: Regular generation with creative sampling
       // print('\n=== Test 1: Creative Generation ===');
@@ -303,7 +301,7 @@ class _MyHomePageState extends State<MyHomePage> {
       const prompt3 = 'Generate a JSON object for a person with name, age, and city:';
       final result3 = await _llama!.generateJson(
         prompt3,
-        jsonConfig: const JsonConfig(strictMode: true, prettyPrint: true),
+        jsonConfig: const JsonConfig(strictMode: false, prettyPrint: true),
         samplerConfig: const SamplerConfig(temperature: 0.5, maxTokens: 100),
       );
 

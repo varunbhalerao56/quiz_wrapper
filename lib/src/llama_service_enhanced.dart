@@ -408,16 +408,8 @@ class LlamaServiceEnhanced {
     print('\n=== JSON Generation (Optimized) ===');
 
     // Use a more effective prompt format that's clearer about what we want
-    final formattedPrompt = '''Complete this JSON object for: $prompt
-
-{
-  "name": "Example Product",
-  "price": 29.99,
-  "description": "Product description",
-  "category": "Electronics"
-}
-
-Now create a similar JSON object:
+    final formattedPrompt = '''Create a JSON object based on the following prompt: $prompt
+          Only return the JSON object, no other text.
 {''';
 
     print('Formatted prompt: "$formattedPrompt"');
@@ -594,99 +586,6 @@ Now create a similar JSON object:
     }
 
     return fixed;
-  }
-
-  /// Generate simple JSON using a reliable template approach (no LLM dependency)
-  Future<String?> generateSimpleJson(String prompt, {JsonConfig? jsonConfig}) async {
-    jsonConfig ??= const JsonConfig();
-
-    print('\n=== Simple JSON Generation (Template-based) ===');
-    print('Prompt: "$prompt"');
-
-    // Create a basic JSON structure based on the prompt keywords
-    final Map<String, dynamic> baseJson = {};
-    final promptLower = prompt.toLowerCase();
-
-    if (promptLower.contains('user') || promptLower.contains('person') || promptLower.contains('profile')) {
-      baseJson.addAll({'name': 'John Doe', 'age': 30, 'email': 'john@example.com'});
-
-      if (promptLower.contains('city') || promptLower.contains('location')) {
-        baseJson['city'] = 'New York';
-      }
-      if (promptLower.contains('phone')) {
-        baseJson['phone'] = '+1-555-0123';
-      }
-    } else if (promptLower.contains('product') || promptLower.contains('item')) {
-      baseJson.addAll({
-        'name': 'Sample Product',
-        'price': 29.99,
-        'description': 'A high-quality product',
-        'category': 'Electronics',
-        'inStock': true,
-      });
-    } else if (promptLower.contains('weather')) {
-      baseJson.addAll({
-        'temperature': 72,
-        'humidity': 65,
-        'conditions': 'Sunny',
-        'windSpeed': 5,
-        'forecast': 'Clear skies expected',
-      });
-    } else if (promptLower.contains('book')) {
-      baseJson.addAll({
-        'title': 'The Great Novel',
-        'author': 'Jane Author',
-        'genre': 'Fiction',
-        'year': 2024,
-        'pages': 350,
-        'isbn': '978-0123456789',
-      });
-    } else if (promptLower.contains('recipe')) {
-      baseJson.addAll({
-        'name': 'Delicious Recipe',
-        'ingredients': ['2 cups flour', '1 cup sugar', '3 eggs'],
-        'instructions': ['Mix dry ingredients', 'Add wet ingredients', 'Bake at 350°F'],
-        'prepTime': '15 minutes',
-        'cookTime': '30 minutes',
-        'difficulty': 'Easy',
-      });
-    } else if (promptLower.contains('company') || promptLower.contains('business')) {
-      baseJson.addAll({
-        'name': 'Tech Solutions Inc',
-        'industry': 'Technology',
-        'employees': 150,
-        'founded': 2010,
-        'revenue': 5000000,
-        'headquarters': 'San Francisco, CA',
-      });
-    } else {
-      // Generic object
-      baseJson.addAll({
-        'id': 1,
-        'name': 'Sample Item',
-        'description': 'A sample object generated from the prompt',
-        'active': true,
-        'timestamp': DateTime.now().toIso8601String(),
-      });
-    }
-
-    print('Generated template JSON with ${baseJson.length} fields');
-
-    // Convert to JSON string
-    try {
-      final jsonString = jsonConfig.prettyPrint
-          ? const JsonEncoder.withIndent('  ').convert(baseJson)
-          : jsonEncode(baseJson);
-
-      print('✓ Template JSON created successfully');
-      return jsonString;
-    } catch (e) {
-      print('✗ Template JSON creation failed: $e');
-      // Ultimate fallback
-      return jsonConfig.prettyPrint
-          ? '{\n  "message": "Template JSON generation",\n  "prompt": "$prompt"\n}'
-          : '{"message": "Template JSON generation", "prompt": "$prompt"}';
-    }
   }
 
   /// Stream generation with real-time updates (better UX)

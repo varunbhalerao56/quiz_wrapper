@@ -164,51 +164,7 @@ Try:
     }
   }
 
-  /// Generate simple JSON (fallback method)
-  Future<void> _generateSimpleJson() async {
-    if (_promptController.text.trim().isEmpty) return;
 
-    setState(() {
-      _isGenerating = true;
-      _jsonResult = 'Generating simple JSON...';
-    });
-
-    try {
-      final prompt = _promptController.text.trim();
-
-      final result = await _llama!.generateSimpleJson(
-        prompt,
-        jsonConfig: JsonConfig(strictMode: _strictMode, prettyPrint: _prettyPrint),
-      );
-
-      setState(() {
-        if (result != null) {
-          _jsonResult =
-              '''✅ Simple JSON Generated!
-
-📝 Prompt: "$prompt"
-
-🎛️ Method: Template-based fallback
-⚙️ Always produces valid JSON
-
-📋 Generated JSON:
-$result''';
-        } else {
-          _jsonResult = '''❌ Simple JSON Generation Failed
-
-This shouldn't happen with the fallback method.''';
-        }
-      });
-    } catch (e) {
-      setState(() {
-        _jsonResult = 'Error: $e';
-      });
-    } finally {
-      setState(() {
-        _isGenerating = false;
-      });
-    }
-  }
 
   /// Load a preset prompt
   void _loadPreset(String preset) {
@@ -437,7 +393,7 @@ This shouldn't happen with the fallback method.''';
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: _isGenerating ? null : _generateSimpleJson,
+                    onPressed: _isGenerating ? null : _generateJson,
                     icon: const Icon(Icons.auto_fix_normal),
                     label: const Text('Simple JSON'),
                     style: ElevatedButton.styleFrom(
