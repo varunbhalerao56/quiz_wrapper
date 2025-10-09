@@ -3,8 +3,10 @@
 /// Provides robust error handling, state validation, and safety guardrails
 /// for all llama.cpp operations.
 
-import 'dart:ffi' as ffi;
+// ignore_for_file: dangling_library_doc_comments
 
+import 'dart:ffi' as ffi;
+import 'package:flutter/foundation.dart';
 /// Base exception class for all llama.cpp related errors
 class LlamaException implements Exception {
   final String message;
@@ -56,7 +58,7 @@ class LlamaContextOverflowException extends LlamaException {
 
 /// Exception thrown when batch parameters are invalid
 class LlamaBatchException extends LlamaException {
-  const LlamaBatchException(String message, [String? operation]) : super(message, operation: operation);
+  const LlamaBatchException(super.message, [String? operation]) : super(operation: operation);
 }
 
 /// Exception thrown when tokenization fails
@@ -69,7 +71,7 @@ class LlamaTokenizationException extends LlamaException {
 
 /// Exception thrown when sampling fails
 class LlamaSamplingException extends LlamaException {
-  const LlamaSamplingException(String message) : super(message, operation: 'sampling');
+  const LlamaSamplingException(super.message) : super(operation: 'sampling');
 }
 
 /// Exception thrown when model loading fails
@@ -82,12 +84,12 @@ class LlamaModelLoadException extends LlamaException {
 
 /// Exception thrown when session operations fail
 class LlamaSessionException extends LlamaException {
-  const LlamaSessionException(String message, [String? operation]) : super(message, operation: operation ?? 'session');
+  const LlamaSessionException(super.message, [String? operation]) : super(operation: operation ?? 'session');
 }
 
 /// Exception thrown when embeddings operations fail
 class LlamaEmbeddingsException extends LlamaException {
-  const LlamaEmbeddingsException(String message) : super(message, operation: 'embeddings');
+  const LlamaEmbeddingsException(super.message) : super(operation: 'embeddings');
 }
 
 /// Safety utilities for validating llama.cpp state and parameters
@@ -163,7 +165,7 @@ class LlamaSafety {
       }
 
       if (fallback != null) {
-        print('Warning: $operation failed, using fallback: $e');
+        debugPrint('Warning: $operation failed, using fallback: $e');
         return fallback;
       }
 
@@ -186,7 +188,7 @@ class LlamaSafety {
       }
 
       if (fallback != null) {
-        print('Warning: $operation failed, using fallback: $e');
+        debugPrint('Warning: $operation failed, using fallback: $e');
         return fallback;
       }
 

@@ -3,12 +3,15 @@
 /// Provides text embeddings computation for RAG (Retrieval Augmented Generation),
 /// semantic search, similarity calculations, and vector operations.
 
+// ignore_for_file: dangling_library_doc_comments
+
 import 'dart:ffi';
 import 'dart:math' as math;
 import 'package:ffi/ffi.dart';
-import '../ffi/llama_ffi.dart';
-import '../core/llama_exceptions.dart';
-import '../utils/llama_config.dart';
+import 'package:quiz_wrapper/src/ffi/llama_ffi.dart';
+import 'package:quiz_wrapper/src/core/llama_exceptions.dart';
+import 'package:quiz_wrapper/src/utils/llama_config.dart';
+import 'package:flutter/foundation.dart';
 
 /// Result of an embeddings computation
 class EmbeddingResult {
@@ -114,7 +117,7 @@ class LlamaEmbeddingsService with DisposableMixin {
       ctxParams.offload_kqv = config.offloadKqv;
       ctxParams.no_perf = config.noPerf;
 
-      print('Creating embeddings context...');
+      debugPrint('Creating embeddings context...');
       _embeddingContext = _llamaCpp.llama_new_context_with_model(_model, ctxParams);
 
       if (_embeddingContext == nullptr || _embeddingContext!.address == 0) {
@@ -127,9 +130,9 @@ class LlamaEmbeddingsService with DisposableMixin {
         throw LlamaEmbeddingsException('Invalid embedding dimensions: $_embeddingDimensions');
       }
 
-      print('✓ Embeddings context created');
-      print('  Embedding dimensions: $_embeddingDimensions');
-      print('  Context size: ${_llamaCpp.llama_n_ctx(_embeddingContext!)}');
+      debugPrint('✓ Embeddings context created');
+      debugPrint('  Embedding dimensions: $_embeddingDimensions');
+      debugPrint('  Context size: ${_llamaCpp.llama_n_ctx(_embeddingContext!)}');
 
       return true;
     } catch (e) {
@@ -155,7 +158,7 @@ class LlamaEmbeddingsService with DisposableMixin {
         throw LlamaTokenizationException(text, 'No tokens produced');
       }
 
-      print('Computing embeddings for ${tokens.length} tokens...');
+      debugPrint('Computing embeddings for ${tokens.length} tokens...');
 
       // Create batch
       final tokensPtr = malloc<llama_token>(tokens.length);
@@ -213,12 +216,12 @@ class LlamaEmbeddingsService with DisposableMixin {
     final results = <EmbeddingResult?>[];
 
     for (int i = 0; i < texts.length; i++) {
-      print('Computing embedding ${i + 1}/${texts.length}...');
+      debugPrint('Computing embedding ${i + 1}/${texts.length}...');
       try {
         final result = await computeEmbedding(texts[i], config: config);
         results.add(result);
       } catch (e) {
-        print('Failed to compute embedding for text ${i + 1}: $e');
+        debugPrint('Failed to compute embedding for text ${i + 1}: $e');
         results.add(null);
       }
     }
@@ -238,7 +241,7 @@ class LlamaEmbeddingsService with DisposableMixin {
 
     // This is a placeholder implementation
     // In practice, you'd compute embeddings and find similarities
-    print('Finding similar texts for: "$query" among ${candidates.length} candidates');
+    debugPrint('Finding similar texts for: "$query" among ${candidates.length} candidates');
 
     // Return empty results for now - would implement full similarity search
     return <SimilarityResult>[];
@@ -252,14 +255,14 @@ class LlamaEmbeddingsService with DisposableMixin {
     try {
       return _llamaCpp.llama_get_embeddings_seq(_embeddingContext!, 0);
     } catch (e) {
-      print('Sequence embeddings failed, trying ith...');
+      debugPrint('Sequence embeddings failed, trying ith...');
     }
 
     // Try index-based embeddings
     try {
       return _llamaCpp.llama_get_embeddings_ith(_embeddingContext!, -1);
     } catch (e) {
-      print('Ith embeddings failed, using default...');
+      debugPrint('Ith embeddings failed, using default...');
     }
 
     // Fall back to default embeddings
@@ -344,7 +347,7 @@ class LlamaEmbeddingsService with DisposableMixin {
     }
     _embeddingDimensions = null;
     markDisposed();
-    print('✓ Embeddings service disposed');
+    debugPrint('✓ Embeddings service disposed');
   }
 }
 

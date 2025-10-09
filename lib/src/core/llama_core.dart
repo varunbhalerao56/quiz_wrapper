@@ -3,14 +3,16 @@
 /// Provides backend initialization, library loading, model management,
 /// and core llama.cpp runtime functionality.
 
+// ignore_for_file: dangling_library_doc_comments
+
 import 'dart:ffi';
 import 'dart:io';
 import 'package:ffi/ffi.dart';
-import '../ffi/llama_ffi.dart';
-import '../core/llama_exceptions.dart';
-import '../utils/llama_config.dart';
-import '../utils/llama_status.dart';
-import '../utils/llama_helpers.dart';
+import 'package:quiz_wrapper/src/ffi/llama_ffi.dart';
+import 'package:quiz_wrapper/src/core/llama_exceptions.dart';
+import 'package:quiz_wrapper/src/utils/llama_config.dart';
+import 'package:quiz_wrapper/src/utils/llama_status.dart';
+import 'package:quiz_wrapper/src/utils/llama_helpers.dart';
 
 /// Core runtime manager for llama.cpp
 class LlamaCoreRuntime with DisposableMixin, StatusMixin {

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:quiz_wrapper/src/llama_service_enhanced.dart';
+import 'package:quiz_wrapper/src/isolates/llama_isolate_parent.dart';
 import 'package:quiz_wrapper/src/utils/llama_config.dart';
 
 void main() {
@@ -29,20 +29,21 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _llama = LlamaServiceEnhanced();
+  final _llama = LlamaIsolateParent();
   final _promptController = TextEditingController();
   final _scrollController = ScrollController();
 
   // Initialization state
   bool _isInitialized = false;
   bool _showStepByStep = false;
+  bool _isolateStarted = false;
   bool _backendInit = false;
   bool _modelLoaded = false;
   bool _contextCreated = false;
   bool _isProcessing = false;
 
   // Generation settings
-  GenerationMode _selectedMode = GenerationMode.balanced;
+  GenerationMode _selectedMode = GenerationMode.json;
   bool _useStreaming = true;
 
   // Output
@@ -63,12 +64,16 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _isProcessing = true);
 
     try {
+      // Start isolate
+      await _llama.start();
+      setState(() => _isolateStarted = true);
+
       // Backend
-      _llama.init();
-      await Future.delayed(const Duration(milliseconds: 100));
+      await _llama.initBackend();
+      setState(() => _backendInit = true);
 
       // Model
-      final loaded = _llama.loadModel(
+      final loaded = await _llama.loadModel(
         '/Users/skywar56/Documents/Flutter/quiz_wrapper/assets/gemma-3-4b-it-Q4_K_M.gguf',
         config: const ModelConfig(nGpuLayers: 0, useMmap: true),
       );
@@ -76,21 +81,19 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!loaded) {
         throw Exception('Failed to load model');
       }
-      await Future.delayed(const Duration(milliseconds: 100));
+      setState(() => _modelLoaded = true);
 
       // Context
-      final contextCreated = _llama.createContext(config: const ContextConfig(nCtx: 8192, nThreads: 4));
+      final contextCreated = await _llama.createContext(config: const ContextConfig(nCtx: 18192, nThreads: 4));
 
       if (!contextCreated) {
         throw Exception('Failed to create context');
       }
 
       setState(() {
+        _contextCreated = true;
         _isInitialized = true;
         _isProcessing = false;
-        _backendInit = true;
-        _modelLoaded = true;
-        _contextCreated = true;
         _response = '✓ Model ready! Select a mode and enter your prompt.';
       });
     } catch (e) {
@@ -105,12 +108,28 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _showStepByStep = true);
   }
 
-  Future<void> _initBackend() async {
+  Future<void> _startIsolate() async {
     setState(() => _isProcessing = true);
-    await Future.delayed(const Duration(milliseconds: 300));
 
     try {
-      _llama.init();
+      await _llama.start();
+      setState(() {
+        _isolateStarted = true;
+        _isProcessing = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isProcessing = false;
+        _response = '✗ Isolate start failed: $e';
+      });
+    }
+  }
+
+  Future<void> _initBackend() async {
+    setState(() => _isProcessing = true);
+
+    try {
+      await _llama.initBackend();
       setState(() {
         _backendInit = true;
         _isProcessing = false;
@@ -125,11 +144,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadModel() async {
     setState(() => _isProcessing = true);
-    await Future.delayed(const Duration(milliseconds: 300));
 
     try {
-      final loaded = _llama.loadModel(
-        '/Users/skywar56/Documents/Flutter/quiz_wrapper/assets/gemma-3-4b-it-Q4_K_M.gguf',
+      final loaded = await _llama.loadModel(
+        '/Users/skywar56/Documents/Flutter/quiz_wrapper/assets/olmo-2-1124-13B-instruct-Q4_K_M.gguf',
         config: const ModelConfig(nGpuLayers: 0, useMmap: true),
       );
 
@@ -151,10 +169,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _createContext() async {
     setState(() => _isProcessing = true);
-    await Future.delayed(const Duration(milliseconds: 300));
 
     try {
-      final contextCreated = _llama.createContext(config: const ContextConfig(nCtx: 8192, nThreads: 4));
+      final contextCreated = await _llama.createContext(config: const ContextConfig(nCtx: 4096, nThreads: 4));
 
       if (!contextCreated) {
         throw Exception('Failed to create context');
@@ -187,36 +204,77 @@ class _HomeScreenState extends State<HomeScreen> {
       _response = '';
     });
 
+    final systemPrompt = '''
+You are a strict JSON parser for quiz text.
+
+Always reply with one JSON object in this exact structure:
+{
+  "questions": [
+    {
+      "id": number,
+      "question": string,
+      "options": [string],
+      "answer": string or [string] or object,
+      "explanation": string,
+      "type": string
+    }
+  ]
+}
+
+Rules:
+- Output ONLY JSON (no markdown, no prose, no comments).
+- Use double quotes for all strings.
+- Keys must be lowercase.
+- IDs start at 1.
+- Remove numbering like "1." or "2)" from question text.
+- If options have labels (A), (B), etc., remove them and keep only the text.
+- If no options exist, set "options": [].
+- If no answer is provided in the text, set "answer": "".
+- If no explanation is provided, set "explanation": "".
+- Detect "true/false" questions as type "true_false".
+- Detect ordering questions as type "arrange".
+- Detect matching pairs as type "match".
+- Otherwise, use "multiple_choice".
+- For "match" type questions:
+  - If the question presents pairs like "Concept = Description", "Concept - Description", or "Concept: Description",
+    then:
+      • Store all pairs inside "options" as a map (object) where each key is the left term, and each value is the right description.
+      • If a right-hand description is missing (like "Widget = ??"), store an empty string ("").
+  - Use the same structure for "answer" if correct mappings are known or provided.
+  - Example:
+    "options": {
+      "Widget": "",
+      "Hot Reload": "updates UI instantly",
+      "BuildContext": "defines tree location",
+      "State": "maintains data changes"
+    }
+
+- If parsing fails or data cannot be structured, return:
+  {"error": "Cannot parse into quiz model."}
+''';
+
     try {
-      if (_selectedMode == GenerationMode.json) {
-        // JSON mode
-        final result = await _llama.generateJson(
+      // Get sampler config based on mode
+      final config = _getSamplerConfig();
+
+      if (_useStreaming) {
+        // Streaming - UI stays smooth!
+        await for (final token in _llama.generateStream(
           _promptController.text,
-          jsonConfig: const JsonConfig(prettyPrint: true),
-        );
+          config: config,
+          systemPrompt: _selectedMode == GenerationMode.json ? systemPrompt : null,
+        )) {
+          setState(() => _response += token);
+          _scrollToBottom();
+        }
+        setState(() => _isGenerating = false);
+      } else {
+        // Non-streaming
+        final result = await _llama.generate(_promptController.text, config: config);
         setState(() {
-          _response = result ?? 'JSON generation failed';
+          _response = result ?? 'Generation failed';
           _isGenerating = false;
         });
-      } else {
-        // Get sampler config based on mode
-        final config = _getSamplerConfig();
-
-        if (_useStreaming) {
-          // Streaming
-          await for (final token in _llama.generateStream(_promptController.text, config: config)) {
-            setState(() => _response += token);
-            _scrollToBottom();
-          }
-          setState(() => _isGenerating = false);
-        } else {
-          // Non-streaming
-          final result = await _llama.generateEnhanced(_promptController.text, config: config);
-          setState(() {
-            _response = result ?? 'Generation failed';
-            _isGenerating = false;
-          });
-        }
       }
 
       _scrollToBottom();
@@ -233,10 +291,22 @@ class _HomeScreenState extends State<HomeScreen> {
       GenerationMode.creative => SamplerConfig.creative,
       GenerationMode.balanced => SamplerConfig.balanced,
       GenerationMode.precise => SamplerConfig.precise,
-      GenerationMode.json => SamplerConfig.balanced,
+      GenerationMode.json => SamplerConfig.deterministic,
     };
 
-    return baseConfig.copyWith(maxTokens: 2048, stopStrings: ['<end_of_turn>']);
+    return baseConfig.copyWith(
+      maxTokens: 3072,
+      stopStrings: [
+        "<|user|>",
+        "<|system|>",
+        "<|assistant|>",
+        "<|begin_of_text|>",
+        "<|end_of_text|>",
+        "<|system|>",
+        "<|end|>",
+        "</s>",
+      ],
+    );
   }
 
   void _scrollToBottom() {
@@ -265,7 +335,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Initialization buttons (only show if not initialized)
+            // Initialization buttons
             if (!_isInitialized) ...[
               Row(
                 children: [
@@ -315,12 +385,22 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 16),
 
+                      // Step 0: Start Isolate
+                      _buildStepTile(
+                        stepNumber: 0,
+                        title: 'Start Isolate',
+                        completed: _isolateStarted,
+                        onPressed: !_isolateStarted && !_isProcessing ? _startIsolate : null,
+                      ),
+                      const SizedBox(height: 8),
+
                       // Step 1: Backend
                       _buildStepTile(
                         stepNumber: 1,
                         title: 'Initialize Backend',
                         completed: _backendInit,
-                        onPressed: !_backendInit && !_isProcessing ? _initBackend : null,
+                        enabled: _isolateStarted,
+                        onPressed: _isolateStarted && !_backendInit && !_isProcessing ? _initBackend : null,
                       ),
                       const SizedBox(height: 8),
 
@@ -354,10 +434,9 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 16),
             ],
 
-
             const SizedBox(height: 16),
 
-            // Generation controls (only show when initialized)
+            // Generation controls
             if (_isInitialized) ...[
               // Mode selection
               const Text('Generation Mode', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -380,14 +459,12 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Streaming toggle (disable for JSON)
+              // Streaming toggle
               SwitchListTile(
                 title: const Text('Use Streaming'),
                 subtitle: const Text('Generate tokens in real-time'),
                 value: _useStreaming,
-                onChanged: _selectedMode == GenerationMode.json
-                    ? null
-                    : (value) => setState(() => _useStreaming = value),
+                onChanged: (value) => setState(() => _useStreaming = value),
               ),
               const SizedBox(height: 16),
 

@@ -3,7 +3,28 @@
 /// Provides JSON serializable configuration classes for all llama.cpp
 /// parameters and settings.
 
+// ignore_for_file: dangling_library_doc_comments
+
 import 'dart:convert';
+
+sealed class StreamEvent {}
+
+class TokenEvent extends StreamEvent {
+  final String token;
+  TokenEvent(this.token);
+}
+
+class DoneEvent extends StreamEvent {
+  final int tokensGenerated;
+  DoneEvent(this.tokensGenerated);
+}
+
+class GenerationResult {
+  final String text;
+  final int tokensGenerated;
+
+  GenerationResult(this.text, this.tokensGenerated);
+}
 
 /// Configuration for sampling parameters with JSON serialization
 class SamplerConfig {
@@ -34,7 +55,7 @@ class SamplerConfig {
   // Preset configurations
   static const SamplerConfig creative = SamplerConfig(temperature: 0.9, topP: 0.95, topK: 50, repeatPenalty: 1.05);
   static const SamplerConfig balanced = SamplerConfig(temperature: 0.7, topP: 0.9, topK: 40, repeatPenalty: 1.1);
-  static const SamplerConfig precise = SamplerConfig(temperature: 0.3, topP: 0.8, topK: 20, repeatPenalty: 1.15);
+  static const SamplerConfig precise = SamplerConfig(temperature: 0.25, topP: 0.8, topK: 30, repeatPenalty: 1.15);
   static const SamplerConfig deterministic = SamplerConfig(temperature: 0.0, topP: 1.0, topK: 1, repeatPenalty: 1.0);
 
   /// Create a copy with modified parameters

@@ -3,10 +3,12 @@
 /// This provides immediate access to the new sampling and JSON features
 /// while the full modular architecture is being refined.
 
+// ignore_for_file: dangling_library_doc_comments
+
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
-import 'dart:math' as math;
+
 import 'package:ffi/ffi.dart';
 import 'ffi/llama_ffi.dart';
 import 'utils/llama_config.dart';
@@ -16,6 +18,7 @@ const bool _kDebugMode = true;
 
 void _debugPrint(String message) {
   if (_kDebugMode) {
+    // ignore: avoid_print
     print('[LlamaService] $message');
   }
 }
@@ -206,7 +209,11 @@ class LlamaServiceEnhanced {
   }
 
   /// Enhanced generate method with full configuration support
-  Future<String?> generateEnhanced(String prompt, {SamplerConfig? config}) async {
+  Future<GenerationResult?> generateEnhanced(
+    String prompt, {
+    SamplerConfig? config,
+    String? systemPrompt = 'You are a helpful, concise assistant.',
+  }) async {
     config ??= const SamplerConfig();
 
     if (_context == null || _context!.address == 0) {
@@ -218,20 +225,49 @@ class LlamaServiceEnhanced {
     _debugPrint('Prompt: "$prompt"');
     _debugPrint('Max tokens: ${config.maxTokens}, Temperature: ${config.temperature}');
 
-    // Yield to UI thread
-    await Future.delayed(const Duration(milliseconds: 10));
+    // Oloma
+    final formattedPrompt =
+        '''
+<|begin_of_text|>
+<|system|>
+$systemPrompt
+<|user|>
+$prompt
+<|assistant|>
+''';
+
+    //     //Phi-3-mini-4k-instruct-q4.gguf
+    //     final formattedPrompt =
+    //         '''
+    // <|system|>
+    // $systemPrompt
+    // <|user|>
+    // $prompt
+    // <|assistant|>
+    // ''';
+
+    //     final formattedPrompt =
+    //         '''
+    // <|begin_of_text|>
+
+    // Your name is Gemma.
+    // The following is a conversation between a user and an AI assistant.
+    // The assistant always replies concisely and politely in plain English.
+
+    // If the user greets the assistant, greet back. Do not change the topic.
+
+    // User: $prompt
+    // Assistant (reply directly to the user without changing topic):
+    // ''';
 
     // Tokenize the prompt
-    final tokens = tokenizeText(prompt);
+    final tokens = tokenizeText(formattedPrompt);
     if (tokens.isEmpty) {
       _debugPrint('✗ Failed to tokenize prompt');
       return null;
     }
 
     _debugPrint('✓ Tokenized into ${tokens.length} tokens');
-
-    // Yield to UI thread
-    await Future.delayed(const Duration(milliseconds: 10));
 
     // Create configurable sampler
     if (_sampler != null && _sampler!.address != 0) {
@@ -265,11 +301,6 @@ class LlamaServiceEnhanced {
       final singleTokenPtr = malloc<llama_token>();
       try {
         while (nDecoded < config.maxTokens && nPos < _llamaCpp.llama_n_ctx(_context!)) {
-          // Yield to UI thread every few tokens
-          if (nDecoded % 5 == 0) {
-            await Future.delayed(const Duration(milliseconds: 1));
-          }
-
           // Sample next token
           final newToken = _llamaCpp.llama_sampler_sample(_sampler!, _context!, -1);
 
@@ -290,7 +321,7 @@ class LlamaServiceEnhanced {
               if (currentText.contains(stopString)) {
                 _debugPrint('✓ Hit stop string: "$stopString" at position $nDecoded');
                 final index = currentText.indexOf(stopString);
-                return currentText.substring(0, index);
+                return GenerationResult(currentText.substring(0, index), nDecoded);
               }
             }
           }
@@ -314,7 +345,7 @@ class LlamaServiceEnhanced {
 
       _debugPrint('=== Generation complete: $nDecoded tokens ===\n');
 
-      return result.toString();
+      return GenerationResult(result.toString(), nDecoded);
     } finally {
       malloc.free(tokensPtr);
     }
@@ -392,8 +423,11 @@ class LlamaServiceEnhanced {
 
       if (length <= 0) return '';
 
+      // Convert the C buffer to a Dart byte list
       final bytes = bufferPtr.cast<Uint8>().asTypedList(length);
-      return String.fromCharCodes(bytes);
+
+      // ✅ Decode as UTF-8 instead of Latin-1
+      return utf8.decode(bytes, allowMalformed: true);
     } finally {
       malloc.free(bufferPtr);
     }
@@ -410,127 +444,48 @@ class LlamaServiceEnhanced {
     return _llamaCpp.llama_token_eos(_vocab!);
   }
 
-  /// JSON generation with explicit rules - let model generate complete JSON
-  Future<String?> generateJson(String prompt, {JsonConfig? jsonConfig, SamplerConfig? samplerConfig}) async {
-    jsonConfig ??= const JsonConfig();
-    samplerConfig ??= const SamplerConfig();
-
-    if (_context == null || _vocab == null) {
-      _debugPrint('✗ Cannot generate JSON: context/vocab not available');
-      return null;
-    }
-
-    _debugPrint('\n=== JSON Generation ===');
-    _debugPrint('User task: "$prompt"');
-
-    // GEMMA CHAT TEMPLATE with explicit JSON rules
-    final formattedPrompt =
-        '''<start_of_turn>user
-Task: $prompt
-
-Generate a valid JSON object following these rules:
-
-JSON STRUCTURE:
-- Start with { and end with }
-- Use key-value pairs separated by commas
-- Keys must be strings in double quotes
-- No trailing comma after last item
-
-DATA TYPES:
-- String: "text in double quotes"
-- Number: 42 or 3.14 (no quotes)
-- Boolean: true or false (no quotes)
-- Null: null (no quotes)
-- Object: {"nested": "data"}
-- Array: [1, 2, 3]
-
-CRITICAL:
-- Use ONLY double quotes, never single quotes
-- No comments allowed
-- All keys must be quoted
-- No trailing commas
-
-Output only the JSON, nothing else.
-<end_of_turn>
-<start_of_turn>model
-''';
-
-    _debugPrint('Using Gemma template with explicit JSON rules');
-
-    try {
-      // Balanced sampling
-      final jsonSamplerConfig = SamplerConfig(
-        temperature: 0.3,
-        topP: 0.9,
-        topK: 40,
-        repeatPenalty: 1.1,
-        frequencyPenalty: 0.0,
-        presencePenalty: 0.0,
-        maxTokens: 8000, // Increased for rules + JSON
-        stopStrings: ['<end_of_turn>', '<start_of_turn>', '\n\n\n'],
-      );
-
-      _debugPrint('Sampler: temp=${jsonSamplerConfig.temperature}, maxTokens=${jsonSamplerConfig.maxTokens}');
-
-      final result = await generateEnhanced(formattedPrompt, config: jsonSamplerConfig);
-
-      if (result == null) {
-        _debugPrint('✗ Generation returned null');
-        return null;
-      }
-
-      _debugPrint('Raw output (${result.length} chars):');
-      _debugPrint(result);
-
-      // Minimal cleanup - just trim whitespace
-      final cleaned = result.trim();
-
-      // Try to parse
-      try {
-        final decoded = jsonDecode(cleaned);
-        _debugPrint('✓ Valid JSON!');
-
-        if (jsonConfig.prettyPrint) {
-          return const JsonEncoder.withIndent('  ').convert(decoded);
-        }
-        return cleaned;
-      } catch (e) {
-        // _debugPrint('✗ Invalid JSON: $e');
-        // _debugPrint('Cleaned output: "$cleaned"');
-
-        // if (jsonConfig.strictMode) {
-        //   _debugPrint('Strict mode: returning null');
-        //   return null;
-        // }
-
-        // _debugPrint('Non-strict mode: returning raw output');
-        return cleaned;
-      }
-    } catch (e) {
-      _debugPrint('✗ Error: $e');
-      return null;
-    }
-  }
-
   /// Stream generation with real-time updates
-  Stream<String> generateStream(String prompt, {SamplerConfig? config}) async* {
+  Stream<StreamEvent> generateStream(
+    String prompt, {
+    SamplerConfig? config,
+    String? systemPrompt = 'You are a helpful, concise assistant.',
+  }) async* {
     config ??= const SamplerConfig();
 
     if (_context == null || _context!.address == 0) {
       _debugPrint('✗ Cannot stream: context not created');
-      yield 'Error: Must create context first';
       return;
     }
 
     _debugPrint('\n=== Streaming Generation ===');
     _debugPrint('Prompt: "$prompt"');
 
+    _debugPrint('systemPrompt: $systemPrompt');
+
+    // Oloma
+    final formattedPrompt =
+        '''
+<|begin_of_text|>
+<|system|>
+$systemPrompt
+<|user|>
+$prompt
+<|assistant|>
+''';
+
+    //     final formattedPrompt =
+    //         '''
+    // <|system|>
+    // $systemPrompt
+    // <|user|>
+    // $prompt
+    // <|assistant|>
+    // ''';
+
     try {
-      await Future.delayed(const Duration(milliseconds: 10));
-      final tokens = tokenizeText(prompt);
+      final tokens = tokenizeText(formattedPrompt);
       if (tokens.isEmpty) {
         _debugPrint('✗ Failed to tokenize prompt');
-        yield 'Error: Failed to tokenize';
         return;
       }
 
@@ -556,7 +511,6 @@ Output only the JSON, nothing else.
         _debugPrint('Decoding prompt...');
         if (_llamaCpp.llama_decode(_context!, batch) != 0) {
           _debugPrint('✗ Failed to decode prompt');
-          yield 'Error: Decode failed';
           return;
         }
         _debugPrint('✓ Prompt decoded, starting generation...');
@@ -577,7 +531,7 @@ Output only the JSON, nothing else.
 
             final tokenText = detokenize(newToken);
             result.write(tokenText);
-            yield tokenText; // Stream immediately
+            yield TokenEvent(tokenText); // Yield token event
 
             // Check stop strings
             if (config.stopStrings.isNotEmpty) {
@@ -585,6 +539,7 @@ Output only the JSON, nothing else.
               for (final stopString in config.stopStrings) {
                 if (currentText.contains(stopString)) {
                   _debugPrint('✓ Streaming complete: stop string "$stopString" at $nDecoded');
+                  yield DoneEvent(nDecoded); // Yield done event with count
                   return;
                 }
               }
@@ -600,11 +555,10 @@ Output only the JSON, nothing else.
 
             nDecoded++;
             nPos++;
-
-            await Future.delayed(const Duration(milliseconds: 1));
           }
 
           _debugPrint('=== Streaming complete: $nDecoded tokens ===');
+          yield DoneEvent(nDecoded); // Yield final done event
         } finally {
           malloc.free(singleTokenPtr);
         }
@@ -613,7 +567,6 @@ Output only the JSON, nothing else.
       }
     } catch (e) {
       _debugPrint('✗ Streaming error: $e');
-      yield 'Error: $e';
     }
   }
 

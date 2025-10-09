@@ -3,10 +3,13 @@
 /// Provides capacity management, performance monitoring, text processing,
 /// and various utility functions to make working with llama.cpp easier.
 
+// ignore_for_file: dangling_library_doc_comments
+import 'package:flutter/foundation.dart';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:math' as math;
-import '../ffi/llama_ffi.dart';
+
+import 'package:quiz_wrapper/src/ffi/llama_ffi.dart';
 
 /// Performance metrics for llama.cpp operations
 class PerformanceMetrics {
@@ -65,7 +68,7 @@ class PerformanceMetrics {
   @override
   String toString() {
     return 'Performance: ${tokensPerSecond.toStringAsFixed(1)} tok/s, '
-        '${totalTokens} tokens in ${totalTime.inMilliseconds}ms';
+        '$totalTokens tokens in ${totalTime.inMilliseconds}ms';
   }
 }
 
@@ -447,7 +450,7 @@ class LlamaLogger {
     final logEntry = '[$timestamp]${category != null ? ' [$category]' : ''} $message';
 
     if (_verboseLogging) {
-      print(logEntry);
+      debugPrint(logEntry);
     }
 
     _logHistory.add(logEntry);
@@ -525,7 +528,7 @@ class TempFileManager {
         }
         _tempFiles.remove(filePath);
       } catch (e) {
-        print('Failed to delete temp file $filePath: $e');
+        debugPrint('Failed to delete temp file $filePath: $e');
       }
     }
 
@@ -551,7 +554,7 @@ class TempFileManager {
             deletedCount++;
           }
         } catch (e) {
-          print('Failed to clean up ${entity.path}: $e');
+          debugPrint('Failed to clean up ${entity.path}: $e');
         }
       }
     }

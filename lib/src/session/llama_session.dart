@@ -3,15 +3,20 @@
 /// Provides session save/load functionality, state persistence,
 /// and context management across application restarts.
 
+// ignore_for_file: dangling_library_doc_comments
+
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:ffi/ffi.dart';
-import '../ffi/llama_ffi.dart';
-import '../core/llama_exceptions.dart';
-import '../utils/llama_config.dart';
-import '../chat/llama_chat.dart';
+import 'package:flutter/foundation.dart';
+import 'package:quiz_wrapper/src/chat/llama_chat.dart';
+import 'package:quiz_wrapper/src/core/llama_exceptions.dart';
+import 'package:quiz_wrapper/src/ffi/llama_ffi.dart';
+import 'package:quiz_wrapper/src/utils/llama_config.dart';
+
+
 
 /// Represents a saved session state
 class SessionData {
@@ -97,7 +102,7 @@ class LlamaSessionManager {
     final dir = Directory(_sessionsDirectory);
     if (!await dir.exists()) {
       await dir.create(recursive: true);
-      print('✓ Created sessions directory: $_sessionsDirectory');
+      debugPrint('✓ Created sessions directory: $_sessionsDirectory');
     }
   }
 
@@ -148,14 +153,14 @@ class LlamaSessionManager {
         }
 
         _loadedSessions[sessionId] = sessionData;
-        print('✓ Session saved: $sessionId');
+        debugPrint('✓ Session saved: $sessionId');
         return true;
       } finally {
         malloc.free(stateFilePtr);
         malloc.free(tokensPtr);
       }
     } catch (e) {
-      print('✗ Failed to save session $sessionId: $e');
+      debugPrint('✗ Failed to save session $sessionId: $e');
       return false;
     }
   }
@@ -166,7 +171,7 @@ class LlamaSessionManager {
       // Load JSON metadata
       final sessionFile = File('$_sessionsDirectory/$sessionId.json');
       if (!await sessionFile.exists()) {
-        print('Session file not found: $sessionId');
+        debugPrint('Session file not found: $sessionId');
         return null;
       }
 
@@ -193,7 +198,7 @@ class LlamaSessionManager {
         }
 
         final loadedTokenCount = tokenCountPtr.value;
-        print('✓ Session loaded: $sessionId ($loadedTokenCount tokens)');
+        debugPrint('✓ Session loaded: $sessionId ($loadedTokenCount tokens)');
 
         _loadedSessions[sessionId] = sessionData;
         return sessionData;
@@ -203,7 +208,7 @@ class LlamaSessionManager {
         malloc.free(tokenCountPtr);
       }
     } catch (e) {
-      print('✗ Failed to load session $sessionId: $e');
+      debugPrint('✗ Failed to load session $sessionId: $e');
       return null;
     }
   }
@@ -234,7 +239,7 @@ class LlamaSessionManager {
       final jsonContent = await sessionFile.readAsString();
       return SessionData.fromJson(jsonDecode(jsonContent));
     } catch (e) {
-      print('Failed to read session metadata: $e');
+      debugPrint('Failed to read session metadata: $e');
       return null;
     }
   }
@@ -254,10 +259,10 @@ class LlamaSessionManager {
       }
 
       _loadedSessions.remove(sessionId);
-      print('✓ Session deleted: $sessionId');
+      debugPrint('✓ Session deleted: $sessionId');
       return true;
     } catch (e) {
-      print('✗ Failed to delete session $sessionId: $e');
+      debugPrint('✗ Failed to delete session $sessionId: $e');
       return false;
     }
   }
@@ -279,7 +284,7 @@ class LlamaSessionManager {
       }
     }
 
-    print('✓ Cleaned up $deletedCount old sessions');
+    debugPrint('✓ Cleaned up $deletedCount old sessions');
     return deletedCount;
   }
 
@@ -418,14 +423,14 @@ class ContextManager {
     _tokenHistory.removeRange(0, math.min(tokensToRemove, _tokenHistory.length));
     _currentPosition = math.max(0, _currentPosition - tokensToRemove);
 
-    print('✓ Truncated $tokensToRemove tokens from context head');
+    debugPrint('✓ Truncated $tokensToRemove tokens from context head');
   }
 
   /// Summarize old context and truncate (placeholder implementation)
   Future<void> _summarizeAndTruncate(int tokensToRemove) async {
     // This would require a separate summarization model or service
     // For now, fall back to simple truncation
-    print('Summarization not implemented, falling back to truncation');
+    debugPrint('Summarization not implemented, falling back to truncation');
     await _truncateHead(tokensToRemove);
   }
 
@@ -437,7 +442,7 @@ class ContextManager {
     _tokenHistory.clear();
     _currentPosition = 0;
 
-    print('✓ Context reset completely');
+    debugPrint('✓ Context reset completely');
   }
 
   /// Get context utilization percentage
@@ -478,7 +483,7 @@ class SessionPersistence {
       }
     }
 
-    print('✓ Session persistence initialized');
+    debugPrint('✓ Session persistence initialized');
   }
 
   /// Save session with automatic backup
@@ -515,7 +520,7 @@ class SessionPersistence {
           throw LlamaSessionException('Failed to save llama.cpp state');
         }
 
-        print('✓ Session saved with backup: $sessionId');
+        debugPrint('✓ Session saved with backup: $sessionId');
         return true;
       } finally {
         malloc.free(stateFilePtr);
@@ -536,14 +541,14 @@ class SessionPersistence {
       // Try to load llama.cpp state
       final stateLoaded = await _loadLlamaState(sessionId, context, sessionData.tokens);
       if (!stateLoaded) {
-        print('Failed to load state, trying backup...');
+        debugPrint('Failed to load state, trying backup...');
         // Could implement backup recovery here
       }
 
-      print('✓ Session loaded: $sessionId');
+      debugPrint('✓ Session loaded: $sessionId');
       return sessionData;
     } catch (e) {
-      print('✗ Failed to load session $sessionId: $e');
+      debugPrint('✗ Failed to load session $sessionId: $e');
       return null;
     }
   }
@@ -601,7 +606,7 @@ class SessionPersistence {
           final sessionData = SessionData.fromJson(jsonDecode(jsonContent));
           sessions.add(sessionData);
         } catch (e) {
-          print('Failed to load session metadata from ${entity.path}: $e');
+          debugPrint('Failed to load session metadata from ${entity.path}: $e');
         }
       }
     }
@@ -640,7 +645,7 @@ class SessionPersistence {
       }
     }
 
-    print('✓ Cleaned up $deletedCount old files');
+    debugPrint('✓ Cleaned up $deletedCount old files');
     return deletedCount;
   }
 

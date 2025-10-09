@@ -3,10 +3,12 @@
 /// Provides advanced tokenization, detokenization, token analysis,
 /// and text processing capabilities.
 
+// ignore_for_file: dangling_library_doc_comments
+
 import 'dart:ffi';
 import 'package:ffi/ffi.dart';
-import '../ffi/llama_ffi.dart';
-import '../core/llama_exceptions.dart';
+import 'package:quiz_wrapper/src/ffi/llama_ffi.dart';
+import 'package:quiz_wrapper/src/core/llama_exceptions.dart';
 
 /// Result of tokenization operation
 class TokenizationResult {

@@ -3,11 +3,14 @@
 /// Provides Mirostat 1.0/2.0, DRY repetition control, Typical sampling,
 /// XTC sampling, and other advanced sampling techniques.
 
+// ignore_for_file: dangling_library_doc_comments
+
 import 'dart:ffi';
 import 'package:ffi/ffi.dart';
-import '../ffi/llama_ffi.dart';
-import '../core/llama_exceptions.dart';
-import '../utils/llama_config.dart';
+import 'package:quiz_wrapper/src/ffi/llama_ffi.dart';
+import 'package:quiz_wrapper/src/core/llama_exceptions.dart';
+import 'package:quiz_wrapper/src/utils/llama_config.dart';
+import 'package:flutter/foundation.dart';
 
 /// Advanced sampling configuration
 class AdvancedSamplerConfig {
@@ -120,7 +123,7 @@ class AdvancedSamplerBuilder {
     samplerParams.no_perf = false;
     final chain = _llamaCpp.llama_sampler_chain_init(samplerParams);
 
-    print('Creating advanced sampler chain:');
+    debugPrint('Creating advanced sampler chain:');
     _logSamplerConfig(basicConfig, advancedConfig);
 
     // Build sampler chain in correct order
@@ -144,7 +147,7 @@ class AdvancedSamplerBuilder {
         config.presencePenalty,
       );
       _llamaCpp.llama_sampler_chain_add(chain, penalties);
-      print('  ✓ Added penalties sampler');
+      debugPrint('  ✓ Added penalties sampler');
     }
   }
 
@@ -176,7 +179,7 @@ class AdvancedSamplerBuilder {
         );
 
         _llamaCpp.llama_sampler_chain_add(chain, drySampler);
-        print('  ✓ Added DRY sampler');
+        debugPrint('  ✓ Added DRY sampler');
       } finally {
         for (final ptr in breakerPtrs) {
           malloc.free(ptr);
@@ -184,7 +187,7 @@ class AdvancedSamplerBuilder {
         malloc.free(breakersPtr);
       }
     } catch (e) {
-      print('  ✗ Failed to add DRY sampler: $e');
+      debugPrint('  ✗ Failed to add DRY sampler: $e');
     }
   }
 
@@ -194,21 +197,21 @@ class AdvancedSamplerBuilder {
     if (config.topK > 0 && config.topK < 1000) {
       final topK = _llamaCpp.llama_sampler_init_top_k(config.topK);
       _llamaCpp.llama_sampler_chain_add(chain, topK);
-      print('  ✓ Added top-k sampler');
+      debugPrint('  ✓ Added top-k sampler');
     }
 
     // Min-P filtering
     if (config.minP > 0.0 && config.minP < 1.0) {
       final minP = _llamaCpp.llama_sampler_init_min_p(config.minP, 1);
       _llamaCpp.llama_sampler_chain_add(chain, minP);
-      print('  ✓ Added min-p sampler');
+      debugPrint('  ✓ Added min-p sampler');
     }
 
     // Top-P (nucleus) filtering
     if (config.topP < 1.0 && config.topP > 0.0) {
       final topP = _llamaCpp.llama_sampler_init_top_p(config.topP, 1);
       _llamaCpp.llama_sampler_chain_add(chain, topP);
-      print('  ✓ Added top-p sampler');
+      debugPrint('  ✓ Added top-p sampler');
     }
   }
 
@@ -218,7 +221,7 @@ class AdvancedSamplerBuilder {
     if (config.useTypical) {
       final typical = _llamaCpp.llama_sampler_init_typical(config.typicalP, config.typicalMinKeep);
       _llamaCpp.llama_sampler_chain_add(chain, typical);
-      print('  ✓ Added typical sampler');
+      debugPrint('  ✓ Added typical sampler');
     }
 
     // XTC sampling
@@ -230,7 +233,7 @@ class AdvancedSamplerBuilder {
         config.useXtc ? DateTime.now().millisecondsSinceEpoch : 0,
       );
       _llamaCpp.llama_sampler_chain_add(chain, xtc);
-      print('  ✓ Added XTC sampler');
+      debugPrint('  ✓ Added XTC sampler');
     }
   }
 
@@ -239,7 +242,7 @@ class AdvancedSamplerBuilder {
     if (config.temperature != 1.0) {
       final temp = _llamaCpp.llama_sampler_init_temp(config.temperature);
       _llamaCpp.llama_sampler_chain_add(chain, temp);
-      print('  ✓ Added temperature sampler');
+      debugPrint('  ✓ Added temperature sampler');
     }
   }
 
@@ -258,7 +261,7 @@ class AdvancedSamplerBuilder {
           advancedConfig.mirostatM,
         );
         _llamaCpp.llama_sampler_chain_add(chain, mirostat);
-        print('  ✓ Added Mirostat v1 sampler');
+        debugPrint('  ✓ Added Mirostat v1 sampler');
       } else {
         final mirostat = _llamaCpp.llama_sampler_init_mirostat_v2(
           basicConfig.seed == -1 ? DateTime.now().millisecondsSinceEpoch : basicConfig.seed,
@@ -266,7 +269,7 @@ class AdvancedSamplerBuilder {
           advancedConfig.mirostatEta,
         );
         _llamaCpp.llama_sampler_chain_add(chain, mirostat);
-        print('  ✓ Added Mirostat v2 sampler');
+        debugPrint('  ✓ Added Mirostat v2 sampler');
       }
     } else {
       // Regular distribution or greedy sampling
@@ -277,29 +280,29 @@ class AdvancedSamplerBuilder {
             );
 
       _llamaCpp.llama_sampler_chain_add(chain, finalSampler);
-      print('  ✓ Added final sampler (${basicConfig.temperature == 0.0 ? "greedy" : "distribution"})');
+      debugPrint('  ✓ Added final sampler (${basicConfig.temperature == 0.0 ? "greedy" : "distribution"})');
     }
   }
 
   /// Log sampler configuration for debugging
   void _logSamplerConfig(SamplerConfig basic, AdvancedSamplerConfig advanced) {
-    print('  Basic: temp=${basic.temperature}, top_p=${basic.topP}, top_k=${basic.topK}');
-    print('  Penalties: repeat=${basic.repeatPenalty}, freq=${basic.frequencyPenalty}');
+    debugPrint('  Basic: temp=${basic.temperature}, top_p=${basic.topP}, top_k=${basic.topK}');
+    debugPrint('  Penalties: repeat=${basic.repeatPenalty}, freq=${basic.frequencyPenalty}');
 
     if (advanced.useMirostat) {
-      print('  Mirostat v${advanced.mirostatVersion}: tau=${advanced.mirostatTau}, eta=${advanced.mirostatEta}');
+      debugPrint('  Mirostat v${advanced.mirostatVersion}: tau=${advanced.mirostatTau}, eta=${advanced.mirostatEta}');
     }
 
     if (advanced.useDry) {
-      print('  DRY: mult=${advanced.dryMultiplier}, base=${advanced.dryBase}');
+      debugPrint('  DRY: mult=${advanced.dryMultiplier}, base=${advanced.dryBase}');
     }
 
     if (advanced.useTypical) {
-      print('  Typical: p=${advanced.typicalP}');
+      debugPrint('  Typical: p=${advanced.typicalP}');
     }
 
     if (advanced.useXtc) {
-      print('  XTC: prob=${advanced.xtcProbability}, thresh=${advanced.xtcThreshold}');
+      debugPrint('  XTC: prob=${advanced.xtcProbability}, thresh=${advanced.xtcThreshold}');
     }
   }
 }

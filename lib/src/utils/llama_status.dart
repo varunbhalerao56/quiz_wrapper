@@ -1,7 +1,11 @@
+import 'package:flutter/foundation.dart';
+
 /// State machine and status tracking for LlamaService
 ///
 /// Provides comprehensive status tracking, state transitions, and
 /// event notifications for all llama.cpp operations.
+
+// ignore_for_file: dangling_library_doc_comments
 
 /// Represents the current state of the LlamaService
 enum LlamaStatus {
@@ -201,7 +205,7 @@ class LlamaStatusManager {
       try {
         callback(event);
       } catch (e) {
-        print('Error in status callback: $e');
+        debugPrint('Error in status callback: $e');
       }
     }
   }
@@ -212,7 +216,7 @@ class LlamaStatusManager {
       try {
         callback(progress);
       } catch (e) {
-        print('Error in progress callback: $e');
+        debugPrint('Error in progress callback: $e');
       }
     }
   }

@@ -3,14 +3,16 @@
 /// Provides stepwise generation, streaming, one-shot completion,
 /// and various generation patterns with proper context management.
 
+// ignore_for_file: dangling_library_doc_comments
+
 import 'dart:async';
 import 'dart:ffi';
 import 'dart:math' as math;
 import 'package:ffi/ffi.dart';
-import '../ffi/llama_ffi.dart';
-import '../core/llama_exceptions.dart';
-import '../utils/llama_config.dart';
-
+import 'package:quiz_wrapper/src/core/llama_exceptions.dart';
+import 'package:quiz_wrapper/src/ffi/llama_ffi.dart';
+import 'package:quiz_wrapper/src/utils/llama_config.dart';
+import 'package:flutter/foundation.dart';
 /// Result of a single generation step
 class GenerationStep {
   final String text;
@@ -118,7 +120,7 @@ class LlamaGenerator with DisposableMixin {
         _generationTimer.reset();
         _generationTimer.start();
 
-        print('✓ Generation initialized with ${_currentTokens!.length} prompt tokens');
+        debugPrint('✓ Generation initialized with ${_currentTokens!.length} prompt tokens');
         return true;
       } finally {
         malloc.free(tokensPtr);
@@ -323,7 +325,7 @@ class LlamaGenerator with DisposableMixin {
 
     // Clear KV cache - this would need the memory management functions
     // For now, we'll just reset our tracking
-    print('✓ Generation state reset');
+    debugPrint('✓ Generation state reset');
   }
 
   /// Get current generation statistics
@@ -416,7 +418,7 @@ class LlamaGenerator with DisposableMixin {
     _currentTokens = null;
     _currentPosition = 0;
     markDisposed();
-    print('✓ Generator disposed');
+    debugPrint('✓ Generator disposed');
   }
 }
 

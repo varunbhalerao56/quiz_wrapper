@@ -3,6 +3,8 @@
 /// Provides conversation management, message formatting, chat templates,
 /// and history management for chat-based interactions.
 
+// ignore_for_file: dangling_library_doc_comments
+
 import 'dart:convert';
 
 /// Represents a single message in a conversation
