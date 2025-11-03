@@ -17,6 +17,7 @@ import 'package:quiz_wrapper/src/utils/llama_helpers.dart';
 /// Simplified parameters that work independently of your existing SamplerConfig.
 /// Use these when creating a sampler chain with LlamaSampler.
 class SamplerParams {
+  // Basic parameters
   final int seed;
   final int topK;
   final double topP;
@@ -27,7 +28,34 @@ class SamplerParams {
   final double penaltyPresent;
   final int penaltyLastN;
 
+  // DRY Sampler parameters
+  // Designed to reduce repetition by penalizing sequences
+  final double dryMultiplier;
+  final double dryBase;
+  final int dryAllowedLength;
+  final int dryPenaltyLastN;
+  final List<String> dryBreakers;
+
+  // XTC Sampler parameters
+  // Excludes low-probability tokens before temperature
+  final double xtcProbability;
+  final double xtcThreshold;
+  final int xtcMinKeep;
+
+  // Mirostat 1.0 parameters
+  // Adaptive sampling to control perplexity
+  final bool useMirostat;
+  final double mirostatTau;
+  final double mirostatEta;
+  final int mirostatM;
+
+  // Mirostat 2.0 parameters
+  final bool useMirostat2;
+  final double mirostat2Tau;
+  final double mirostat2Eta;
+
   const SamplerParams({
+    // Basic
     this.seed = 0,
     this.topK = 40,
     this.topP = 0.95,
@@ -37,6 +65,25 @@ class SamplerParams {
     this.penaltyFreq = 0.0,
     this.penaltyPresent = 0.0,
     this.penaltyLastN = 64,
+    // DRY
+    this.dryMultiplier = 0.0,
+    this.dryBase = 1.75,
+    this.dryAllowedLength = 2,
+    this.dryPenaltyLastN = -1,
+    this.dryBreakers = const ['\n', ':', '"', '*'],
+    // XTC
+    this.xtcProbability = 0.0,
+    this.xtcThreshold = 0.1,
+    this.xtcMinKeep = 1,
+    // Mirostat 1.0
+    this.useMirostat = false,
+    this.mirostatTau = 5.0,
+    this.mirostatEta = 0.1,
+    this.mirostatM = 100,
+    // Mirostat 2.0
+    this.useMirostat2 = false,
+    this.mirostat2Tau = 5.0,
+    this.mirostat2Eta = 0.1,
   });
 
   /// Deterministic sampling - always picks highest probability
@@ -51,6 +98,22 @@ class SamplerParams {
   /// Precise sampling - low randomness
   static const precise = SamplerParams(temp: 0.3, topP: 0.85, topK: 20, minP: 0.1);
 
+  /// DRY sampling preset - reduces repetition
+  static const antiRepetitive = SamplerParams(
+    temp: 0.7,
+    topP: 0.9,
+    topK: 40,
+    dryMultiplier: 0.8,
+    dryBase: 1.75,
+    dryAllowedLength: 2,
+  );
+
+  /// XTC sampling preset - more focused output
+  static const focused = SamplerParams(temp: 0.7, topP: 0.9, xtcProbability: 0.5, xtcThreshold: 0.1);
+
+  /// Mirostat sampling preset - controlled perplexity
+  static const controlled = SamplerParams(useMirostat2: true, mirostat2Tau: 5.0, mirostat2Eta: 0.1);
+
   /// Copy with modifications
   SamplerParams copyWith({
     int? seed,
@@ -62,6 +125,24 @@ class SamplerParams {
     double? penaltyFreq,
     double? penaltyPresent,
     int? penaltyLastN,
+    // DRY
+    double? dryMultiplier,
+    double? dryBase,
+    int? dryAllowedLength,
+    int? dryPenaltyLastN,
+    List<String>? dryBreakers,
+    // XTC
+    double? xtcProbability,
+    double? xtcThreshold,
+    int? xtcMinKeep,
+    // Mirostat
+    bool? useMirostat,
+    double? mirostatTau,
+    double? mirostatEta,
+    int? mirostatM,
+    bool? useMirostat2,
+    double? mirostat2Tau,
+    double? mirostat2Eta,
   }) {
     return SamplerParams(
       seed: seed ?? this.seed,
@@ -73,6 +154,21 @@ class SamplerParams {
       penaltyFreq: penaltyFreq ?? this.penaltyFreq,
       penaltyPresent: penaltyPresent ?? this.penaltyPresent,
       penaltyLastN: penaltyLastN ?? this.penaltyLastN,
+      dryMultiplier: dryMultiplier ?? this.dryMultiplier,
+      dryBase: dryBase ?? this.dryBase,
+      dryAllowedLength: dryAllowedLength ?? this.dryAllowedLength,
+      dryPenaltyLastN: dryPenaltyLastN ?? this.dryPenaltyLastN,
+      dryBreakers: dryBreakers ?? this.dryBreakers,
+      xtcProbability: xtcProbability ?? this.xtcProbability,
+      xtcThreshold: xtcThreshold ?? this.xtcThreshold,
+      xtcMinKeep: xtcMinKeep ?? this.xtcMinKeep,
+      useMirostat: useMirostat ?? this.useMirostat,
+      mirostatTau: mirostatTau ?? this.mirostatTau,
+      mirostatEta: mirostatEta ?? this.mirostatEta,
+      mirostatM: mirostatM ?? this.mirostatM,
+      useMirostat2: useMirostat2 ?? this.useMirostat2,
+      mirostat2Tau: mirostat2Tau ?? this.mirostat2Tau,
+      mirostat2Eta: mirostat2Eta ?? this.mirostat2Eta,
     );
   }
 }
@@ -102,16 +198,22 @@ class LlamaSampler with DisposableMixin {
   /// 3. Top-P filtering (nucleus sampling)
   /// 4. Min-P filtering (minimum probability threshold)
   /// 5. Temperature scaling (randomness control)
-  /// 6. Grammar constraint (if provided - FORCES valid output)
-  /// 7. Repetition penalties (prevent repetition)
+  /// 6. XTC sampling (if enabled - excludes low-probability tokens)
+  /// 7. Grammar constraint (if provided - FORCES valid output)
+  /// 8. Repetition penalties (prevent repetition)
+  /// 9. DRY sampler (if enabled - advanced repetition reduction)
+  /// 10. Mirostat 1.0 (if enabled - adaptive sampling)
+  /// 11. Mirostat 2.0 (if enabled - simpler adaptive sampling)
   ///
   /// [vocab] - The vocabulary from the model
   /// [params] - Sampling parameters (use presets or custom)
   /// [grammar] - Optional grammar to constrain output (100% valid JSON)
+  /// [nCtxTrain] - Training context size (required for DRY sampler)
   Pointer<llama_sampler> createSamplerChain({
     required Pointer<llama_vocab> vocab,
     SamplerParams params = const SamplerParams(),
     GrammarConfig? grammar,
+    int? nCtxTrain,
   }) {
     checkNotDisposed('createSamplerChain');
 
@@ -136,7 +238,16 @@ class LlamaSampler with DisposableMixin {
       // 5. Temperature sampling (scale randomness)
       _llamaCpp.llama_sampler_chain_add(chain, _llamaCpp.llama_sampler_init_temp(params.temp));
 
-      // 6. Grammar constraint (if provided - this FORCES valid structure)
+      // 6. XTC Sampler (if enabled - excludes low-probability tokens)
+      if (params.xtcProbability > 0.0) {
+        _llamaCpp.llama_sampler_chain_add(
+          chain,
+          _llamaCpp.llama_sampler_init_xtc(params.xtcProbability, params.xtcThreshold, params.xtcMinKeep, params.seed),
+        );
+        LlamaLogger.info('✓ XTC sampler enabled: p=${params.xtcProbability}');
+      }
+
+      // 7. Grammar constraint (if provided - this FORCES valid structure)
       if (grammar != null && grammar.grammarStr.isNotEmpty) {
         final grammarSampler = _createGrammarSampler(vocab, grammar);
         if (grammarSampler != nullptr) {
@@ -145,7 +256,7 @@ class LlamaSampler with DisposableMixin {
         }
       }
 
-      // 7. Repetition penalties (prevent repetitive output)
+      // 8. Repetition penalties (standard)
       _llamaCpp.llama_sampler_chain_add(
         chain,
         _llamaCpp.llama_sampler_init_penalties(
@@ -155,6 +266,62 @@ class LlamaSampler with DisposableMixin {
           params.penaltyPresent,
         ),
       );
+
+      // 9. DRY Sampler (if enabled - advanced repetition reduction)
+      if (params.dryMultiplier > 0.0 && nCtxTrain != null) {
+        final breakersPtr = malloc<Pointer<Char>>(params.dryBreakers.length);
+        try {
+          // Convert breakers to native strings
+          for (int i = 0; i < params.dryBreakers.length; i++) {
+            breakersPtr[i] = params.dryBreakers[i].toNativeUtf8().cast<Char>();
+          }
+
+          _llamaCpp.llama_sampler_chain_add(
+            chain,
+            _llamaCpp.llama_sampler_init_dry(
+              vocab,
+              nCtxTrain,
+              params.dryMultiplier,
+              params.dryBase,
+              params.dryAllowedLength,
+              params.dryPenaltyLastN,
+              breakersPtr,
+              params.dryBreakers.length,
+            ),
+          );
+          LlamaLogger.info('✓ DRY sampler enabled: multiplier=${params.dryMultiplier}');
+        } finally {
+          // Free breaker strings
+          for (int i = 0; i < params.dryBreakers.length; i++) {
+            malloc.free(breakersPtr[i]);
+          }
+          malloc.free(breakersPtr);
+        }
+      }
+
+      // 10. Mirostat 1.0 (if enabled - adaptive sampling)
+      if (params.useMirostat) {
+        _llamaCpp.llama_sampler_chain_add(
+          chain,
+          _llamaCpp.llama_sampler_init_mirostat(
+            _llamaCpp.llama_vocab_n_tokens(vocab),
+            params.seed,
+            params.mirostatTau,
+            params.mirostatEta,
+            params.mirostatM,
+          ),
+        );
+        LlamaLogger.info('✓ Mirostat 1.0 enabled: tau=${params.mirostatTau}, eta=${params.mirostatEta}');
+      }
+
+      // 11. Mirostat 2.0 (if enabled - simpler adaptive sampling)
+      if (params.useMirostat2) {
+        _llamaCpp.llama_sampler_chain_add(
+          chain,
+          _llamaCpp.llama_sampler_init_mirostat_v2(params.seed, params.mirostat2Tau, params.mirostat2Eta),
+        );
+        LlamaLogger.info('✓ Mirostat 2.0 enabled: tau=${params.mirostat2Tau}, eta=${params.mirostat2Eta}');
+      }
 
       _sampler = chain;
       LlamaLogger.info('✓ Sampler chain created successfully');
@@ -249,7 +416,14 @@ class LlamaSampler with DisposableMixin {
 extension SamplerParamsExtension on SamplerParams {
   /// Convert to a human-readable description
   String describe() {
-    return 'SamplerParams(temp: $temp, topK: $topK, topP: $topP, minP: $minP)';
+    final parts = <String>['temp: $temp', 'topK: $topK', 'topP: $topP', 'minP: $minP'];
+
+    if (dryMultiplier > 0.0) parts.add('DRY: $dryMultiplier');
+    if (xtcProbability > 0.0) parts.add('XTC: $xtcProbability');
+    if (useMirostat) parts.add('Mirostat1');
+    if (useMirostat2) parts.add('Mirostat2');
+
+    return 'SamplerParams(${parts.join(', ')})';
   }
 
   /// Check if this is deterministic sampling
@@ -257,4 +431,7 @@ extension SamplerParamsExtension on SamplerParams {
 
   /// Check if this is high-temperature (creative) sampling
   bool get isCreative => temp >= 0.85;
+
+  /// Check if any advanced samplers are enabled
+  bool get hasAdvancedSamplers => dryMultiplier > 0.0 || xtcProbability > 0.0 || useMirostat || useMirostat2;
 }

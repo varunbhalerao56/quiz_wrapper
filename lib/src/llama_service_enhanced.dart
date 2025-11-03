@@ -209,10 +209,10 @@ class LlamaServiceEnhanced {
 
   /// Create a configurable sampler chain
   /// Create sampler chain using new LlamaSampler (with optional grammar)
+  /// Create sampler chain using new LlamaSampler (with optional grammar)
   Pointer<llama_sampler> _createConfigurableSampler(SamplerConfig config) {
     _debugPrint('Creating sampler chain with config: $config');
 
-    // ✅ REPLACE ENTIRE METHOD BODY WITH THIS:
     if (_samplerManager == null) {
       throw StateError('Sampler manager not initialized');
     }
@@ -229,11 +229,15 @@ class LlamaServiceEnhanced {
       penaltyPresent: config.presencePenalty,
     );
 
-    // Create sampler with optional grammar
+    // Get context size for DRY sampler
+    final nCtxTrain = _llamaCpp.llama_model_n_ctx_train(_model!);
+
+    // Create sampler with optional grammar and context size
     return _samplerManager!.createSamplerChain(
       vocab: _vocab!,
       params: params,
-      grammar: config.grammar, // ✅ Grammar is automatically applied!
+      grammar: config.grammar,
+      nCtxTrain: nCtxTrain, // ✅ Pass context size for DRY sampler
     );
   }
 
