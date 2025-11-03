@@ -88,7 +88,7 @@ class LlamaCoreRuntime with DisposableMixin, StatusMixin {
   /// Get default library path for current platform
   String _getDefaultLibraryPath() {
     if (Platform.isMacOS) {
-      return 'llama.framework/llama';
+      return 'Llama.framework/llama';
     } else if (Platform.isLinux) {
       return 'libllama.so';
     } else if (Platform.isWindows) {
@@ -96,7 +96,7 @@ class LlamaCoreRuntime with DisposableMixin, StatusMixin {
     } else if (Platform.isAndroid) {
       return 'libllama.so';
     } else if (Platform.isIOS) {
-      return 'llama.framework/llama';
+      return 'Llama.framework/llama';
     } else {
       throw LlamaException('Unsupported platform: ${Platform.operatingSystem}');
     }
@@ -110,7 +110,7 @@ class LlamaCoreRuntime with DisposableMixin, StatusMixin {
       alternatives.addAll([
         '/usr/local/lib/libllama.dylib',
         '/opt/homebrew/lib/libllama.dylib',
-        'Frameworks/llama.framework/llama',
+        'Frameworks/Llama.framework/llama',
       ]);
     } else if (Platform.isLinux) {
       alternatives.addAll(['/usr/lib/libllama.so', '/usr/local/lib/libllama.so', './libllama.so']);
@@ -552,7 +552,7 @@ class LibraryLoader {
       'ggml-cpu.framework/ggml-cpu',
       'ggml-metal.framework/ggml-metal',
       'ggml.framework/ggml',
-      'llama.framework/llama',
+      'Llama.framework/llama',
       'mtmd.framework/mtmd',
     ];
 

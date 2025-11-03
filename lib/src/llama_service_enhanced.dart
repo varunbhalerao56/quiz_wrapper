@@ -39,7 +39,7 @@ class LlamaServiceEnhanced {
   bool _initialized = false;
 
   LlamaServiceEnhanced() {
-    _lib = DynamicLibrary.open('llama.framework/llama');
+    _lib = DynamicLibrary.open('libllama.dylib');
     _llamaCpp = llama_cpp(_lib);
     _debugPrint('Instance created');
   }

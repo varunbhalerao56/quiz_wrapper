@@ -1,6 +1,6 @@
 PODS:
   - Flutter (1.0.0)
-  - llama_cpp_dart (0.0.8):
+  - llama (0.1.1):
     - Flutter
   - path_provider_foundation (0.0.1):
     - Flutter
@@ -8,22 +8,22 @@ PODS:
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
-  - llama_cpp_dart (from `.symlinks/plugins/llama_cpp_dart/ios`)
+  - llama (from `.`)
   - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
 
 EXTERNAL SOURCES:
   Flutter:
     :path: Flutter
-  llama_cpp_dart:
-    :path: ".symlinks/plugins/llama_cpp_dart/ios"
+  llama:
+    :path: "."
   path_provider_foundation:
     :path: ".symlinks/plugins/path_provider_foundation/darwin"
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  llama_cpp_dart: 43a56ce4086d5078592f64950236e035ad64a4ba
+  llama: cdeb0db9850e775dd0df50e7f6746aeb891526f9
   path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
 
-PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+PODFILE CHECKSUM: 8d322b979c2c4261387cfcd6bd9d44067415aadc
 
 COCOAPODS: 1.16.2

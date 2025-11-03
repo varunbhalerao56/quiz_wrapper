@@ -101,28 +101,18 @@ build_platform() {
       lib_name=$(basename "$lib")
       echo "  ✓ Copied ${lib_name}"
       
-      # Get the base name without lib prefix and .dylib extension
-      base_name="${lib_name#lib}"
-      base_name="${base_name%.dylib}"
+      # ✅ FIX: Use @loader_path for dylib references (NOT framework paths)
+      install_name_tool -id "@loader_path/${lib_name}" "${OUTPUT_DIR}/${lib_name}"
       
-      # Fix install name - use the framework style name
-      install_name_tool -id "@rpath/${base_name}.framework/${base_name}" "${OUTPUT_DIR}/${lib_name}"
-      
-      # Update dependencies to use framework paths
+      # Update dependencies to use @loader_path (dylib style, not framework)
       for dep_lib in "${LIBS[@]}"; do
         dep_name=$(basename "$dep_lib")
-        dep_base="${dep_name#lib}"
-        dep_base="${dep_base%.dylib}"
         
         if [ "$dep_name" != "$lib_name" ]; then
-          # Change from @rpath/libXXX.dylib to @rpath/XXX.framework/XXX
+          # Change any @rpath references to @loader_path
           install_name_tool -change \
             "@rpath/${dep_name}" \
-            "@rpath/${dep_base}.framework/${dep_base}" \
-            "${OUTPUT_DIR}/${lib_name}" 2>/dev/null || true
-          install_name_tool -change \
             "@loader_path/${dep_name}" \
-            "@rpath/${dep_base}.framework/${dep_base}" \
             "${OUTPUT_DIR}/${lib_name}" 2>/dev/null || true
         fi
       done
