@@ -53,6 +53,16 @@ class LlamaCoreRuntime with DisposableMixin, StatusMixin {
 
   /// Load the llama.cpp dynamic library
   Future<DynamicLibrary> _loadLibrary(String? libraryPath) async {
+    // For iOS, always use DynamicLibrary.process()
+    if (Platform.isIOS) {
+      try {
+        LlamaLogger.debug('Loading iOS framework via DynamicLibrary.process()');
+        return DynamicLibrary.process();
+      } catch (e) {
+        throw LlamaException('Failed to load iOS framework: $e');
+      }
+    }
+
     libraryPath ??= _getDefaultLibraryPath();
 
     try {
@@ -122,8 +132,6 @@ class LlamaCoreRuntime with DisposableMixin, StatusMixin {
 
   /// Check if backend is initialized
   bool get isInitialized => _backendInitialized && !isDisposed;
-
-
 
   /// Get system information
   String getSystemInfo() {

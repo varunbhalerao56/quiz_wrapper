@@ -226,28 +226,19 @@ class LlamaSampler with DisposableMixin {
       // 1. Distribution sampling (provides base randomness)
       _llamaCpp.llama_sampler_chain_add(chain, _llamaCpp.llama_sampler_init_dist(params.seed));
 
-      // 2. Top-K sampling (keep only K most likely tokens)
+      // 2. Top-K sampling
       _llamaCpp.llama_sampler_chain_add(chain, _llamaCpp.llama_sampler_init_top_k(params.topK));
 
-      // 3. Top-P / Nucleus sampling (cumulative probability threshold)
+      // 3. Top-P sampling
       _llamaCpp.llama_sampler_chain_add(chain, _llamaCpp.llama_sampler_init_top_p(params.topP, 1));
 
-      // 4. Min-P sampling (minimum probability threshold)
+      // 4. Min-P sampling
       _llamaCpp.llama_sampler_chain_add(chain, _llamaCpp.llama_sampler_init_min_p(params.minP, 1));
 
-      // 5. Temperature sampling (scale randomness)
+      // 5. Temperature sampling
       _llamaCpp.llama_sampler_chain_add(chain, _llamaCpp.llama_sampler_init_temp(params.temp));
 
-      // 6. XTC Sampler (if enabled - excludes low-probability tokens)
-      if (params.xtcProbability > 0.0) {
-        _llamaCpp.llama_sampler_chain_add(
-          chain,
-          _llamaCpp.llama_sampler_init_xtc(params.xtcProbability, params.xtcThreshold, params.xtcMinKeep, params.seed),
-        );
-        LlamaLogger.info('✓ XTC sampler enabled: p=${params.xtcProbability}');
-      }
-
-      // 7. Grammar constraint (if provided - this FORCES valid structure)
+      // 6. Grammar constraint (if provided)
       if (grammar != null && grammar.grammarStr.isNotEmpty) {
         final grammarSampler = _createGrammarSampler(vocab, grammar);
         if (grammarSampler != nullptr) {
@@ -256,7 +247,7 @@ class LlamaSampler with DisposableMixin {
         }
       }
 
-      // 8. Repetition penalties (standard)
+      // 7. Repetition penalties
       _llamaCpp.llama_sampler_chain_add(
         chain,
         _llamaCpp.llama_sampler_init_penalties(
@@ -267,61 +258,11 @@ class LlamaSampler with DisposableMixin {
         ),
       );
 
-      // 9. DRY Sampler (if enabled - advanced repetition reduction)
-      if (params.dryMultiplier > 0.0 && nCtxTrain != null) {
-        final breakersPtr = malloc<Pointer<Char>>(params.dryBreakers.length);
-        try {
-          // Convert breakers to native strings
-          for (int i = 0; i < params.dryBreakers.length; i++) {
-            breakersPtr[i] = params.dryBreakers[i].toNativeUtf8().cast<Char>();
-          }
-
-          _llamaCpp.llama_sampler_chain_add(
-            chain,
-            _llamaCpp.llama_sampler_init_dry(
-              vocab,
-              nCtxTrain,
-              params.dryMultiplier,
-              params.dryBase,
-              params.dryAllowedLength,
-              params.dryPenaltyLastN,
-              breakersPtr,
-              params.dryBreakers.length,
-            ),
-          );
-          LlamaLogger.info('✓ DRY sampler enabled: multiplier=${params.dryMultiplier}');
-        } finally {
-          // Free breaker strings
-          for (int i = 0; i < params.dryBreakers.length; i++) {
-            malloc.free(breakersPtr[i]);
-          }
-          malloc.free(breakersPtr);
-        }
-      }
-
-      // 10. Mirostat 1.0 (if enabled - adaptive sampling)
-      if (params.useMirostat) {
-        _llamaCpp.llama_sampler_chain_add(
-          chain,
-          _llamaCpp.llama_sampler_init_mirostat(
-            _llamaCpp.llama_vocab_n_tokens(vocab),
-            params.seed,
-            params.mirostatTau,
-            params.mirostatEta,
-            params.mirostatM,
-          ),
-        );
-        LlamaLogger.info('✓ Mirostat 1.0 enabled: tau=${params.mirostatTau}, eta=${params.mirostatEta}');
-      }
-
-      // 11. Mirostat 2.0 (if enabled - simpler adaptive sampling)
-      if (params.useMirostat2) {
-        _llamaCpp.llama_sampler_chain_add(
-          chain,
-          _llamaCpp.llama_sampler_init_mirostat_v2(params.seed, params.mirostat2Tau, params.mirostat2Eta),
-        );
-        LlamaLogger.info('✓ Mirostat 2.0 enabled: tau=${params.mirostat2Tau}, eta=${params.mirostat2Eta}');
-      }
+      // ✅ 8. ADD THIS - Final token selector (CRITICAL!)
+      _llamaCpp.llama_sampler_chain_add(
+        chain,
+        _llamaCpp.llama_sampler_init_dist(params.seed), // Or use greedy for temp=0
+      );
 
       _sampler = chain;
       LlamaLogger.info('✓ Sampler chain created successfully');

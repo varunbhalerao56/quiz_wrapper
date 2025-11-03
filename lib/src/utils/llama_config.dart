@@ -52,7 +52,7 @@ class SamplerConfig {
     this.temperature = 0.7,
     this.topP = 0.9,
     this.topK = 40,
-    this.minP = 0.05,
+    this.minP = 0,
     this.repeatPenalty = 1.1,
     this.frequencyPenalty = 0.0,
     this.presencePenalty = 0.0,
@@ -66,7 +66,7 @@ class SamplerConfig {
   static const SamplerConfig creative = SamplerConfig(temperature: 0.9, topP: 0.95, topK: 50, repeatPenalty: 1.05);
   static const SamplerConfig balanced = SamplerConfig(temperature: 0.7, topP: 0.9, topK: 40, repeatPenalty: 1.1);
   static const SamplerConfig precise = SamplerConfig(temperature: 0.25, topP: 0.8, topK: 30, repeatPenalty: 1.15);
-  static const SamplerConfig deterministic = SamplerConfig(temperature: 0.0, topP: 1.0, topK: 1, repeatPenalty: 1.0);
+  static const SamplerConfig deterministic = SamplerConfig(temperature: 0.10, topP: 1.0, topK: 1, repeatPenalty: 1.0);
 
   /// Create a copy with modified parameters
   SamplerConfig copyWith({
@@ -561,4 +561,3 @@ ws ::= [ \\t\\n\\r]*
     return GrammarConfig(grammarStr: rules, grammarRoot: root, lazy: lazy, triggerWords: triggerWords);
   }
 }
-
